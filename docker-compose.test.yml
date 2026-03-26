@@ -4,7 +4,7 @@ services:
 
   # Frontend Service (unchanged)
   orgas-frontend:
-    image: paxley/orgas-app:2.0.0
+    image: infinitytools/orgas-frontend:2.0.22
     environment:
       - NODE_ENV=production
       - VITE_API_BASE_URL=https://app.orgahold.com
@@ -33,7 +33,7 @@ services:
       - portainer_default
   # Backend API Service (v2.0.5 with Python AI Agent integration)
   orgas-api:
-    image: paxley/orgas-api:2.0.5
+    image: infinitytools/orgas-api:2.0.44
     environment:
       - NODE_ENV=production
       - PORT=3000

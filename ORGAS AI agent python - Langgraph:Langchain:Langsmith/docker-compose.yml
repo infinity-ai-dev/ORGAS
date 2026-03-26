@@ -4,8 +4,8 @@ version: '3.8'
 # ORGAS AI - Complete Microservice Orchestration
 # ============================================================================
 # Services:
-# - Frontend (Next.js): paxley/orgas-app:2.0.1-test
-# - Backend API (Express/TypeScript): paxley/orgas-api:2.0.3-test
+# - Frontend (Next.js): infinitytools/orgas-frontend:2.0.22
+# - Backend API (Express/TypeScript): infinitytools/orgas-api:2.0.44
 # - AI Agents (FastAPI/LangGraph): Custom Python service
 # - Database (Supabase self-hosted PostgreSQL)
 # - Cache (Redis)
@@ -83,7 +83,7 @@ services:
   # FRONTEND - Next.js Application
   # ============================================================================
   orgas-frontend:
-    image: paxley/orgas-app:2.0.1-test
+    image: infinitytools/orgas-frontend:2.0.22
     container_name: orgas-frontend
     environment:
       NODE_ENV: production
@@ -106,7 +106,7 @@ services:
   # BACKEND API - Express.js/TypeScript
   # ============================================================================
   orgas-api:
-    image: paxley/orgas-api:2.0.3-test
+    image: infinitytools/orgas-api:2.0.44
     container_name: orgas-api
     environment:
       # Express Configuration
@@ -163,7 +163,7 @@ services:
     build:
       context: ./agent
       dockerfile: Dockerfile
-    image: orgas-ai-agents:3.0.1
+    image: infinitytools/orgas-ai-agent:3.0.29
     container_name: orgas-ai-agents
     environment:
       # FastAPI Configuration

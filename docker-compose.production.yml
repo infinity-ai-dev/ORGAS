@@ -15,7 +15,7 @@ services:
   # FRONTEND SERVICE - React + Vite
   # ============================================================================
   orgas-frontend:
-    image: paxley/orgas-frontend:2.0.22
+    image: infinitytools/orgas-frontend:2.0.22
     container_name: orgas-frontend-prod
     environment:
       - NODE_ENV=production
@@ -50,7 +50,7 @@ services:
   # BACKEND API SERVICE - Express/TypeScript v2.0.5
   # ============================================================================
   orgas-api:
-    image: paxley/orgas-api:2.0.44
+    image: infinitytools/orgas-api:2.0.44
     container_name: orgas-api-prod
     environment:
       # Environment
@@ -177,7 +177,7 @@ services:
   # AI AGENTS SERVICE - FastAPI/LangGraph/LangChain v3.0.28
   # ============================================================================
   orgas-ai-agents:
-    image: paxley/orgas-ai-agent:3.0.29
+    image: infinitytools/orgas-ai-agent:3.0.29
     container_name: orgas-ai-agent-prod
     environment:
       # FastAPI Configuration

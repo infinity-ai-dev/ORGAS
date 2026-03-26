@@ -2,7 +2,7 @@ version: "3.9"
 
 services:
   html2pdf:
-    image: paxley/orgas-convert-html-pdf:0.1.6
+    image: infinitytools/orgas-convert-html-pdf:0.1.6
     environment:
       - NODE_ENV=production
       - PORT=1724
