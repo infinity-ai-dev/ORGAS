@@ -1,0 +1,220 @@
+version: '3.8'
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ORGAS AI Agent - Docker Compose Configuration
+# Version: 3.0.0
+# Usage: docker-compose -f docker-compose.agent.yml up
+# ═══════════════════════════════════════════════════════════════════════════════
+
+services:
+
+  # ═════════════════════════════════════════════════════════════════════════════
+  # ORGAS AI Agent Service - LangGraph + FastAPI
+  # ═════════════════════════════════════════════════════════════════════════════
+  orgas-ai-agent:
+    # Build from local Dockerfile
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    container_name: orgas-ai-agent-dev
+
+    # ─── Environment Variables (loaded from .env or docker-compose) ─────────────
+    env_file:
+      - .env
+
+    environment:
+      # ─── FastAPI Configuration ───────────────────────────────────────────────
+      HOST: "0.0.0.0"
+      PORT: 8000
+      DEBUG: "false"
+      ENVIRONMENT: "development"
+      WORKERS: 4
+      LOG_LEVEL: "INFO"
+
+      # ─── Agent Configuration ─────────────────────────────────────────────────
+      MAX_WORKERS: 5
+      TIMEOUT_SECONDS: 30
+      STORAGE_CACHE_TTL: 3000
+
+      # ─── Database Configuration ──────────────────────────────────────────────
+      DB_HOST: "postgres"
+      DB_PORT: 5432
+      DB_NAME: "orgas_db"
+      DB_USER: "postgres"
+      DB_PASSWORD: "orgas_secure_password_123"
+      DB_SSL: "false"
+
+      # ─── Redis Configuration ─────────────────────────────────────────────────
+      REDIS_HOST: "redis"
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+
+      # ─── LLM APIs (Override with your actual keys) ──────────────────────────
+      GOOGLE_API_KEY: "${GOOGLE_API_KEY:-your_google_key_here}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-your_openai_key_here}"
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-your_anthropic_key_here}"
+
+      # ─── LLM Model Configuration ─────────────────────────────────────────────
+      GEMINI_MODEL: "gemini-2.5-flash"
+      GEMINI_TEMPERATURE: "0.2"
+      GEMINI_MAX_TOKENS: "4096"
+
+      OPENAI_MODEL: "gpt-4-turbo"
+      OPENAI_TEMPERATURE: "0.2"
+      OPENAI_MAX_TOKENS: "4096"
+
+      # ─── LLM Fallback Configuration ──────────────────────────────────────────
+      LLM_FALLBACK_ENABLED: "true"
+      LLM_FALLBACK_TIMEOUT: "30"
+
+      # ─── LangGraph Configuration ─────────────────────────────────────────────
+      CHECKPOINT_DIR: "/app/checkpoints"
+      MAX_ITERATIONS: "10"
+
+      # ─── Semantic Memory ─────────────────────────────────────────────────────
+      SEMANTIC_BUFFER_SIZE: "10"
+      SEMANTIC_SIMILARITY_THRESHOLD: "0.7"
+      SEMANTIC_MAX_CONTEXT_MESSAGES: "20"
+
+      # ─── RAG Pipeline ────────────────────────────────────────────────────────
+      RAG_CHUNK_SIZE: "1000"
+      RAG_CHUNK_OVERLAP: "200"
+      RAG_RETRIEVAL_K: "5"
+      RAG_SCORE_THRESHOLD: "0.6"
+
+      # ─── Document Processing ────────────────────────────────────────────────
+      MAX_DOCUMENT_SIZE_MB: "50"
+
+      # ─── Supabase Storage (Optional) ─────────────────────────────────────────
+      SUPABASE_STORAGE_URL: "${SUPABASE_STORAGE_URL:-}"
+      SUPABASE_SERVICE_ROLE_KEY: "${SUPABASE_SERVICE_ROLE_KEY:-}"
+
+      # ─── External Services ──────────────────────────────────────────────────
+      HTML2PDF_URL: "${HTML2PDF_URL:-https://html2pdf.example.com/pdf}"
+      HTML2PDF_API_KEY: "${HTML2PDF_API_KEY:-}"
+
+      # ─── Python Configuration ───────────────────────────────────────────────
+      PYTHONUNBUFFERED: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+
+    # ─── Volume Mounts ──────────────────────────────────────────────────────────
+    volumes:
+      # Mount source code for development
+      - .:/app:cached
+
+      # Persist checkpoints
+      - agent_checkpoints:/app/checkpoints
+
+      # Persist cache
+      - agent_cache:/app/.cache
+
+    # ─── Port Mappings ──────────────────────────────────────────────────────────
+    ports:
+      - "8000:8000"  # FastAPI API server
+      - "9000:9000"  # Debug/Uvicorn (if reload enabled)
+
+    # ─── Depends On ─────────────────────────────────────────────────────────────
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+    # ─── Health Check ───────────────────────────────────────────────────────────
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    # ─── Restart Policy ────────────────────────────────────────────────────────
+    restart: unless-stopped
+
+    # ─── Networks ───────────────────────────────────────────────────────────────
+    networks:
+      - orgas-network
+
+    # ─── Logging ─────────────────────────────────────────────────────────────────
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+        labels: "service=orgas-ai-agent,version=3.0.0"
+
+  # ═════════════════════════════════════════════════════════════════════════════
+  # PostgreSQL Database
+  # ═════════════════════════════════════════════════════════════════════════════
+  postgres:
+    image: postgres:15-alpine
+    container_name: orgas-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: orgas_secure_password_123
+      POSTGRES_DB: orgas_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - orgas-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+        labels: "service=postgres,version=15"
+
+  # ═════════════════════════════════════════════════════════════════════════════
+  # Redis Cache
+  # ═════════════════════════════════════════════════════════════════════════════
+  redis:
+    image: redis:7-alpine
+    container_name: orgas-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - orgas-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+        labels: "service=redis,version=7"
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Named Volumes - Data Persistence
+# ═════════════════════════════════════════════════════════════════════════════
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  agent_checkpoints:
+    driver: local
+  agent_cache:
+    driver: local
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Networks - Service Communication
+# ═════════════════════════════════════════════════════════════════════════════
+networks:
+  orgas-network:
+    driver: bridge

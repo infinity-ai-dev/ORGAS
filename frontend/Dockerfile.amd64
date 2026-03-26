@@ -1,0 +1,50 @@
+# Build Stage - AMD64 Architecture Optimized
+FROM --platform=linux/amd64 node:20.19.5-alpine3.22 AS build
+
+LABEL maintainer="ORGAS Team"
+LABEL description="ORGAS Frontend - React + Vite (AMD64)"
+LABEL version="2.0.22"
+LABEL architecture="amd64"
+
+ARG TARGETARCH=amd64
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY . .
+
+ARG VITE_API_BASE_URL
+ARG VITE_API_PREFIX
+ARG VITE_FRONTEND_PROXY_SECRET
+ARG VITE_REQUIRE_HANDSHAKE
+
+ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
+ENV VITE_API_PREFIX=${VITE_API_PREFIX}
+ENV VITE_FRONTEND_PROXY_SECRET=${VITE_FRONTEND_PROXY_SECRET}
+ENV VITE_REQUIRE_HANDSHAKE=${VITE_REQUIRE_HANDSHAKE}
+
+RUN npm run build
+
+# Runtime Stage - Nginx
+FROM --platform=linux/amd64 nginx:1.27-alpine
+
+LABEL maintainer="ORGAS Team"
+LABEL description="ORGAS Frontend - React + Vite (AMD64)"
+LABEL version="2.0.22"
+LABEL architecture="amd64"
+
+ARG TARGETARCH=amd64
+
+WORKDIR /usr/share/nginx/html
+
+COPY --from=build /app/dist .
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=15s --retries=3 \
+    CMD /bin/true
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]

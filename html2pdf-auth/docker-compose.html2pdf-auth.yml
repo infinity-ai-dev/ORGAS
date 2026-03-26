@@ -1,0 +1,93 @@
+version: "3.9"
+
+services:
+  html2pdf:
+    image: paxley/orgas-convert-html-pdf:0.1.6
+    environment:
+      - NODE_ENV=production
+      - PORT=1724
+    deploy:
+      replicas: 1
+      update_config:
+        parallelism: 1
+        delay: 5s
+        order: start-first
+      restart_policy:
+        condition: on-failure
+        max_attempts: 3
+        window: 60s
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 512M
+        reservations:
+          cpus: "0.10"
+          memory: 128M
+      labels:
+        - traefik.enable=true
+        - traefik.docker.network=network_public
+
+        # HTTPS
+        - traefik.http.routers.html2pdf_https.rule=Host(`html2pdf.mayacrm.shop`)
+        - traefik.http.routers.html2pdf_https.entrypoints=websecure
+        - traefik.http.routers.html2pdf_https.tls.certresolver=letsencryptresolver
+        - traefik.http.routers.html2pdf_https.service=html2pdf
+        - traefik.http.routers.html2pdf_https.middlewares=html2pdf-auth
+        - traefik.http.services.html2pdf.loadbalancer.server.port=1724
+        - traefik.http.services.html2pdf.loadbalancer.passHostHeader=1
+
+        # HTTP -> HTTPS
+        - traefik.http.routers.html2pdf_http.rule=Host(`html2pdf.mayacrm.shop`)
+        - traefik.http.routers.html2pdf_http.entrypoints=web
+        - traefik.http.routers.html2pdf_http.middlewares=html2pdf-https-redirect
+        - traefik.http.middlewares.html2pdf-https-redirect.redirectscheme.scheme=https
+
+        # Auth middleware (forwardAuth)
+        - traefik.http.middlewares.html2pdf-auth.forwardauth.address=http://html2pdf_auth:8080/verify
+        - traefik.http.middlewares.html2pdf-auth.forwardauth.trustForwardHeader=true
+        - traefik.http.middlewares.html2pdf-auth.forwardauth.authResponseHeaders=X-Api-User
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - network_public
+
+  html2pdf_auth:
+    image: paxley/html2pdf-auth:0.1.0
+    environment:
+      - NODE_ENV=production
+      - PORT=8080
+      - API_KEY_HEADER=x-api-key
+      - API_KEYS_TABLE=credentials
+      - API_KEY_FIELD=apikey
+      - API_USER_FIELD=username
+      - API_ACTIVE_FIELD=active
+      - API_LOG_TABLE=api_key_logs
+
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=html2pdf_credentials
+      - DB_USER=postgres
+      - DB_PASS=CHANGE_ME
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        max_attempts: 3
+        window: 60s
+      resources:
+        limits:
+          cpus: "0.50"
+          memory: 256M
+        reservations:
+          cpus: "0.05"
+          memory: 64M
+    networks:
+      - network_public
+
+networks:
+  network_public:
+    external: true
+    name: network_public

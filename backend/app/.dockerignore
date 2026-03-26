@@ -1,0 +1,4 @@
+.env.development
+.env.local
+node_modules
+npm-debug.log

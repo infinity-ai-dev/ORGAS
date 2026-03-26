@@ -1,0 +1,148 @@
+version: '3.9'
+
+services:
+  # PostgreSQL - Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: orgas-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-orgas}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-orgas_password}
+      POSTGRES_DB: ${POSTGRES_DB:-orgas_ai}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-orgas}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - orgas-network
+    restart: unless-stopped
+
+  # Redis - Cache & Message Queue
+  redis:
+    image: redis:7-alpine
+    container_name: orgas-redis
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redis_password}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - orgas-network
+    restart: unless-stopped
+
+  # ORGAS Agent API - FastAPI
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: orgas-api
+    environment:
+      # FastAPI
+      PORT: 8000
+      HOST: 0.0.0.0
+      DEBUG: ${DEBUG:-false}
+
+      # Database
+      DATABASE_URL: postgresql://${POSTGRES_USER:-orgas}:${POSTGRES_PASSWORD:-orgas_password}@postgres:5432/${POSTGRES_DB:-orgas_ai}
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-orgas}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-orgas_password}
+      POSTGRES_DB: ${POSTGRES_DB:-orgas_ai}
+
+      # Redis
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_password}@redis:6379/0
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-redis_password}
+
+      # LLM APIs
+      GOOGLE_API_KEY: ${GOOGLE_API_KEY}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+
+      # Application
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+
+    volumes:
+      # Mount code para desenvolvimento (comentar em produção)
+      - .:/app
+      - /app/__pycache__
+
+    ports:
+      - "${API_PORT:-8000}:8000"
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+    networks:
+      - orgas-network
+
+    restart: unless-stopped
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Optonal: PgAdmin - PostgreSQL Management
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: orgas-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@orgas.local}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+    ports:
+      - "${PGADMIN_PORT:-5050}:80"
+    depends_on:
+      - postgres
+    networks:
+      - orgas-network
+    restart: unless-stopped
+    profiles:
+      - debug
+
+  # Optional: Redis Commander - Redis Management
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: orgas-redis-commander
+    environment:
+      REDIS_HOSTS: local:redis:6379:0:${REDIS_PASSWORD:-redis_password}
+    ports:
+      - "${REDIS_COMMANDER_PORT:-8081}:8081"
+    depends_on:
+      - redis
+    networks:
+      - orgas-network
+    restart: unless-stopped
+    profiles:
+      - debug
+
+# Named volumes para persistência
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+# Network compartilhada
+networks:
+  orgas-network:
+    driver: bridge

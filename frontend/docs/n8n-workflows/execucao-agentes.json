@@ -1,0 +1,1452 @@
+{
+  "name": "[001][EXECUCAO ENTRE AGENTES]",
+  "nodes": [
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "key",
+              "value": "AIzaSyBJvGsG5No83LNgHU_kqh10f4Tgo4cevx8"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "7651a2f6-3cdd-40cd-965a-ae2f26396248",
+      "name": "HTTP - Agente 4 Notas",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3360,
+        1248
+      ],
+      "retryOnFail": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.item.json;\nconst dadosOriginais = $input.first().json;\n\nconst rawText = response.candidates?.[0]?.content?.parts?.[0]?.text || '{}';\nlet dados = JSON.parse(rawText.replace(/```json|```/g, '').trim());\n\n// ========================================\n// FUNÇÃO AUXILIAR - CONVERTER VALOR BR PARA NÚMERO\n// ========================================\nfunction parseFloatBR(valor) {\n  if (typeof valor === 'number') return valor;\n  if (!valor) return 0;\n  return parseFloat(valor.toString().replace(/\\./g, '').replace(',', '.')) || 0;\n}\n\n// ========================================\n// FUNÇÃO AUXILIAR - FORMATAR NÚMERO PARA BR\n// ========================================\nfunction formatarValorBR(valor) {\n  return valor.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });\n}\n\n// ========================================\n// CALCULAR COMPRAS A PARTIR DAS ENTRADAS\n// ========================================\n// Soma apenas itens da seção ENTRADAS que contêm \"COMPRA\" na descrição\n// SAÍDAS e SERVIÇOS não são considerados\n\nlet totalCompras = 0;\nlet itensCompras = [];\n\n// Processar ENTRADAS - somar apenas itens com \"COMPRA\" na descrição\n// SAÍDAS e SERVIÇOS não são considerados no cálculo de compras\nif (dados.entradas && Array.isArray(dados.entradas)) {\n  for (const entrada of dados.entradas) {\n    const descricao = (entrada.descricao || '').toUpperCase();\n    const valor = parseFloatBR(entrada.valor);\n\n    // Verificar se é uma compra (contém \"COMPRA\" na descrição)\n    if (descricao.includes('COMPRA')) {\n      totalCompras += valor;\n      itensCompras.push({\n        codigo: entrada.codigo,\n        descricao: entrada.descricao,\n        valor: entrada.valor\n      });\n      console.log(`✅ Compra encontrada: ${entrada.descricao} = R$ ${entrada.valor}`);\n    } else {\n      console.log(`⏭️ Ignorando entrada (não é compra): ${entrada.descricao}`);\n    }\n  }\n}\n\n// comprasMes = apenas soma das ENTRADAS com \"COMPRA\" (sem subtrair devoluções)\nconsole.log(`📊 Total Compras (ENTRADAS): R$ ${formatarValorBR(totalCompras)}`);\n\n// ========================================\n// RETORNAR DADOS PROCESSADOS\n// ========================================\nreturn {\n  reportId: dadosOriginais.reportId,\n  documentoIndex: dadosOriginais.documentoIndex,\n  documentoNome: dadosOriginais.documentoNome,\n  clienteId: dadosOriginais.clienteId,\n  clienteNome: dadosOriginais.clienteNome,\n  regimeTributario: dadosOriginais.regimeTributario,\n  agenteProcessador: 'AGENTE_4_NOTAS',\n  ...dados,\n  // Dados de compras (apenas ENTRADAS com \"COMPRA\" na descrição)\n  compras: {\n    total: formatarValorBR(totalCompras),\n    itensCompras: itensCompras\n  },\n  comprasMes: formatarValorBR(totalCompras),  // Soma das ENTRADAS com \"COMPRA\"\n  timestampProcessamento: new Date().toISOString()\n};"
+      },
+      "id": "54692487-709d-41a1-9b2e-fd2e2361f54c",
+      "name": "Code - Processar Agente 4",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4672,
+        1248
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "564ef48a-3db8-4106-83d2-240ac92c7144",
+              "name": "systemInstruction.parts[0].text",
+              "value": "=# AGENTE 4 - EXTRATOR DE NOTAS FISCAIS E RESUMO POR ACUMULADOR\n\nExtraia dados de NFS-e, NF-e, CT-e ou Resumo por Acumulador.\n\n---\n\n## CENÁRIOS\n\n**Nota única:** Extrair número, data, valor, CNPJs, impostos\n**Relatório de Notas:** Extrair período, quantidade, total, canceladas, gaps\n**Resumo por Acumulador:** Extrair ENTRADAS (compras), SAÍDAS (devoluções) e SERVIÇOS\n\n---\n\n## EXTRAIR\n\n1. **RAZÃO SOCIAL:** Nome da empresa (cabeçalho)\n2. **CNPJ:** CNPJ da empresa\n3. **Tipo de Documento:** NFSE, NFE, CTE ou RESUMO_ACUMULADOR\n4. **Período:** MM/AAAA\n5. **Quantidade de Notas** (se aplicável)\n6. **Faturamento Total** (seção SERVIÇOS ou notas de saída)\n7. **Notas Canceladas**\n8. **Gaps na Numeração**\n9. **Impostos Retidos:** ISS, IRRF, PIS, COFINS\n10. **ENTRADAS:** Array com TODAS as linhas da tabela (código, descrição, valor)\n11. **SAÍDAS:** Array com linhas de devoluções (código, descrição, valor)\n\n---\n\n## FORMATO\n\n- Valores: `1.250,00` (brasileiro, sem R$)\n- Data: `DD/MM/AAAA`\n- Razão social: texto completo como aparece no documento\n\n---\n\n## SAÍDA JSON\n```json\n{\n  \"razaoSocial\": \"Nome completo da empresa\",\n  \"cnpj\": \"00.000.000/0000-00\",\n  \"tipoNota\": \"NFSE|NFE|CTE|RESUMO_ACUMULADOR\",\n  \"cenario\": \"nota_unica|relatorio_multiplas|resumo_acumulador\",\n  \"periodo\": \"MM/AAAA\",\n  \"quantidadeNotas\": 0,\n  \"faturamentoTotal\": \"0,00\",\n  \"notasCanceladas\": [],\n  \"gapsNumeracao\": [],\n  \"impostosRetidos\": {\n    \"iss\": \"0,00\",\n    \"irrf\": \"0,00\",\n    \"pis\": \"0,00\",\n    \"cofins\": \"0,00\",\n    \"total\": \"0,00\"\n  },\n  \"detalhesNota\": {\n    \"numero\": \"\",\n    \"dataEmissao\": \"\",\n    \"cnpjEmitente\": \"\",\n    \"valorTotal\": \"0,00\"\n  },\n  \"entradas\": [\n    {\"codigo\": \"1200\", \"descricao\": \"COMPRA P/ INDUSTRIALIZACAO\", \"valor\": \"11.198,19\"},\n    {\"codigo\": \"1201\", \"descricao\": \"COMPRA P/ INDUSTRIALIZACAO ST\", \"valor\": \"67.759,52\"},\n    {\"codigo\": \"3001\", \"descricao\": \"FRETE - SERV. ADQ. C/ ICMS\", \"valor\": \"9.565,94\"}\n  ],\n  \"saidas\": [\n    {\"codigo\": \"5211\", \"descricao\": \"DEVOLUCAO COMPRA P/ INDUSTRIA ST\", \"valor\": \"3.943,08\"}\n  ],\n  \"observacoes\": \"\"\n}\n```\n\n---\n\n## REGRAS PARA RESUMO POR ACUMULADOR\n\n1. **ENTRADAS:** Extrair TODAS as linhas da seção \"ENTRADAS\" com código, descrição e Vlr Contábil\n2. **SAÍDAS:** Extrair TODAS as linhas da seção \"SAÍDAS\" com código, descrição e Vlr Contábil\n3. **SERVIÇOS:** O total da seção SERVIÇOS vai no campo faturamentoTotal\n4. Se não houver seção ENTRADAS, retornar array vazio: `\"entradas\": []`\n5. Se não houver seção SAÍDAS, retornar array vazio: `\"saidas\": []`\n\n---\n\n## GAPS NA NUMERAÇÃO\nEx: Notas 100, 101, 104, 105 → gaps: [\"102\", \"103\"]",
+              "type": "string"
+            },
+            {
+              "id": "6d4a0eb7-1d0d-4909-91e5-7b3f83425d45",
+              "name": "contents",
+              "value": "=[\n  {\n    \"role\": \"user\",\n    \"parts\": [\n      {\n        \"text\": \"Cliente: {{ $json[\"clienteNome\"] }}\\nCNPJ: {{ $json[\"cnpjDetectado\"] }}\\nPeriodo: {{ $json[\"periodoDetectado\"] }}\\n\\nExtraia todas as entradas.\"\n      }\n    ]\n  },\n  {\n    \"role\": \"user\",\n    \"parts\": [\n      {\n        \"file_data\": {\n          \"file_uri\": \"{{ $json[\"file_uri\"] }}\",\n          \"mime_type\": \"{{ $json[\"mime_type\"] }}\"\n        }\n      }\n    ]\n  }\n]\n",
+              "type": "array"
+            },
+            {
+              "id": "4fb5ff3e-57fa-48c9-be26-870d60f440a2",
+              "name": "generationConfig.temperature",
+              "value": 0.1,
+              "type": "number"
+            },
+            {
+              "id": "6052f418-c7b9-428d-ac06-07c47b0232ea",
+              "name": "generationConfig.maxOutputTokens",
+              "value": 5000,
+              "type": "number"
+            },
+            {
+              "id": "0a6c857e-8932-44fc-af2a-98e5310023f9",
+              "name": "generationConfig.responseMimeType",
+              "value": "application/json",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        3168,
+        1248
+      ],
+      "id": "187655ec-01d3-4eaf-b15a-879fa70886b6",
+      "name": "Requisição para o Agente 4"
+    },
+    {
+      "parameters": {
+        "numberInputs": 4
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        5024,
+        1008
+      ],
+      "id": "0a7ffabe-e1ac-4196-bd80-cd9be28ac015",
+      "name": "Merge5"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "key",
+              "value": "AIzaSyBJvGsG5No83LNgHU_kqh10f4Tgo4cevx8"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "9c32f4cb-1af3-458f-9ed1-a8591100730e",
+      "name": "HTTP - Agente 3 Folha",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3360,
+        1104
+      ],
+      "retryOnFail": true,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pegar a resposta do Gemini do item atual\nconst item = $input.item.json;\n\n// Extrair o texto da resposta do Gemini\nconst rawText = item.candidates?.[0]?.content?.parts?.[0]?.text || '{}';\n\n// Limpar e fazer parse do JSON\nlet dados;\ntry {\n  const cleanText = rawText.replace(/```json|```/g, '').trim();\n  dados = JSON.parse(cleanText);\n} catch (error) {\n  throw new Error(`Erro ao parsear JSON do Agente 3: ${error.message}\\nTexto recebido: ${rawText}`);\n}\n\n// Pegar dados originais que vieram antes (do documento)\n// Estes dados devem estar no item atual, não em $input.first()\nconst dadosOriginais = {\n  reportId: item.reportId || item.dados?.reportId,\n  documentoIndex: item.documentoIndex || item.dados?.documentoIndex,\n  documentoNome: item.documentoNome || item.dados?.documentoNome || 'Folha de Pagamento',\n  clienteId: item.clienteId || item.dados?.clienteId,\n  clienteNome: item.clienteNome || item.dados?.clienteNome,\n  regimeTributario: item.regimeTributario || item.dados?.regimeTributario\n};\n\n// Montar o resultado final\nconst resultado = {\n  ...dadosOriginais,\n  agenteProcessador: 'AGENTE_3_FOLHA',\n  ...dados,\n  timestampProcessamento: new Date().toISOString(),\n  temErro: false\n};\n\n// IMPORTANTE: Retornar no formato correto do N8N\nreturn { json: resultado };"
+      },
+      "id": "40a606a1-7786-4a36-92f4-a6d880aba8c2",
+      "name": "Code - Processar Agente 3",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4672,
+        1104
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "564ef48a-3db8-4106-83d2-240ac92c7144",
+              "name": "systemInstruction.parts[0].text",
+              "value": "=# AGENTE 3 - EXTRATOR DE FOLHA\n\nExtraia totalizadores da folha de pagamento.\n\n---\n\n## EXTRAIR\n\n1. **RAZÃO SOCIAL:** Nome da empresa no cabeçalho da folha\n2. **Período** (MM/AAAA)\n3. **Total Salário Bruto**\n4. **Total INSS Empresa** (~20% ou campo \"Empresa\" na seção INSS)\n5. **Total FGTS** (8% ou campo \"Valor do FGTS\")\n6. **Quantidade de Funcionários**\n7. **Total Líquido Pago**\n\n---\n\n## CÁLCULO\ntotalCustoFolha = salarioBruto + INSS + FGTS\n\n---\n\n## FORMATO\n\n- Valores: `1.250,00` (brasileiro, sem R$)\n- Razão social: texto completo como aparece no documento\n\n---\n\n## SAÍDA JSON\n```json\n{\n  \"razaoSocial\": \"Nome completo da empresa\",\n  \"periodo\": \"MM/AAAA\",\n  \"totalSalarioBruto\": \"0,00\",\n  \"totalINSS\": \"0,00\",\n  \"totalFGTS\": \"0,00\",\n  \"quantidadeFuncionarios\": 0,\n  \"totalLiquido\": \"0,00\",\n  \"totalCustoFolha\": \"0,00\",\n  \"observacoes\": \"\"\n}\n\nATENÇÃO\n\nINSS Empresa: busque na seção \"INSS\" o campo \"Empresa\" ou \"Segurados\"\nSe a folha não tiver FGTS ou INSS, preencha com \"0,00\"\nQuantidade de funcionários: conte os colaboradores listados",
+              "type": "string"
+            },
+            {
+              "id": "6d4a0eb7-1d0d-4909-91e5-7b3f83425d45",
+              "name": "contents",
+              "value": "=[\n  {\n    \"role\": \"user\",\n    \"parts\": [\n      {\n        \"text\": \"Cliente: {{ $json[\"clienteNome\"] }}\\nCNPJ: {{ $json[\"cnpjDetectado\"] }}\\nPeriodo: {{ $json[\"periodoDetectado\"] }}\\n\\nExtraia todas as entradas.\"\n      }\n    ]\n  },\n  {\n    \"role\": \"user\",\n    \"parts\": [\n      {\n        \"file_data\": {\n          \"file_uri\": \"{{ $json[\"file_uri\"] }}\",\n          \"mime_type\": \"{{ $json[\"mime_type\"] }}\"\n        }\n      }\n    ]\n  }\n]\n",
+              "type": "array"
+            },
+            {
+              "id": "4fb5ff3e-57fa-48c9-be26-870d60f440a2",
+              "name": "generationConfig.temperature",
+              "value": 0.1,
+              "type": "number"
+            },
+            {
+              "id": "6052f418-c7b9-428d-ac06-07c47b0232ea",
+              "name": "generationConfig.maxOutputTokens",
+              "value": 5000,
+              "type": "number"
+            },
+            {
+              "id": "0a6c857e-8932-44fc-af2a-98e5310023f9",
+              "name": "generationConfig.responseMimeType",
+              "value": "application/json",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        3168,
+        1104
+      ],
+      "id": "1e220670-bf4a-4096-ba6a-13fc5bf77a4d",
+      "name": "Requisição para o Agente 3"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "key",
+              "value": "AIzaSyBJvGsG5No83LNgHU_kqh10f4Tgo4cevx8"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "83723a56-d0ef-49c2-bc7b-c658a5c1aba0",
+      "name": "HTTP - Agente 2 PGDAS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3360,
+        960
+      ],
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 5000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const geminiResponse = $input.item.json;\nconst dadosOriginais = $input.first().json;\n\n// ========================================\n// EXTRAI E LIMPA RESPOSTA\n// ========================================\nconst rawText = geminiResponse.candidates?.[0]?.content?.parts?.[0]?.text || '{}';\nconst cleanText = rawText.replace(/```json|```/g, '').trim();\n\n// ========================================\n// PARSE SEGURO COM VALIDAÇÃO\n// ========================================\nlet dadosExtraidos;\ntry {\n  dadosExtraidos = JSON.parse(cleanText);\n\n  // Valida campos obrigatórios\n  if (!dadosExtraidos.razaoSocial || !dadosExtraidos.cnpj) {\n    throw new Error('Resposta incompleta - faltam dados básicos');\n  }\n\n} catch (error) {\n  console.error('❌ Erro ao processar Agente 2 (PGDAS):', error.message);\n  console.error('📄 Resposta recebida:', rawText.substring(0, 500));\n\n  // Fallback com estrutura mínima\n  dadosExtraidos = {\n    razaoSocial: dadosOriginais.clienteNome || 'Não identificado',\n    cnpj: dadosOriginais.cnpjDetectado || '00.000.000/0000-00',\n    periodo: dadosOriginais.periodoDetectado || '00/0000',\n    receitaBrutaMes: '0,00',\n    receitaBrutaAcumulada: '0,00',\n    aliquota: '0,00',\n    valorDAS: '0,00',\n    anexo: null,\n    aplicouFatorR: false,\n    dataVencimentoDAS: null,\n    comprasMes: '0,00',\n    comprasAcumuladas: '0,00',\n    somenteGuia: true,\n    receitasMensaisAnoCorrente: [],\n    folhasMensais: [],\n    estabelecimentos: [],  // ← ADICIONADO\n    observacoes: `Erro no processamento: ${error.message}`,\n    _erro: true\n  };\n}\n\n// ========================================\n// GARANTE CAMPOS DE HISTÓRICO EXISTEM\n// ========================================\nif (!dadosExtraidos.receitasMensaisAnoCorrente) {\n  dadosExtraidos.receitasMensaisAnoCorrente = [];\n}\n\nif (!dadosExtraidos.folhasMensais) {\n  dadosExtraidos.folhasMensais = [];\n}\n\n// ========================================\n// ✅ GARANTE CAMPO ESTABELECIMENTOS EXISTE\n// ========================================\nif (!dadosExtraidos.estabelecimentos) {\n  dadosExtraidos.estabelecimentos = [];\n}\n\n// ========================================\n// ✅ GARANTE CAMPO IMPOSTOS MENSAIS EXISTE (CRÍTICO)\n// ========================================\nif (!dadosExtraidos.impostosMensais) {\n  // Se não extraiu histórico, cria array com pelo menos o mês atual\n  dadosExtraidos.impostosMensais = [\n    {\n      mes: dadosExtraidos.periodo,\n      valor: dadosExtraidos.valorDAS\n    }\n  ];\n  console.log('⚠️ impostosMensais não encontrado - criado com mês atual');\n} else {\n  // Valida se o mês atual está no array\n  const mesAtualNoArray = dadosExtraidos.impostosMensais.some(\n    i => i.mes === dadosExtraidos.periodo\n  );\n\n  if (!mesAtualNoArray) {\n    // Adiciona o mês atual se não estiver\n    dadosExtraidos.impostosMensais.push({\n      mes: dadosExtraidos.periodo,\n      valor: dadosExtraidos.valorDAS\n    });\n\n    // Ordena por data\n    dadosExtraidos.impostosMensais.sort((a, b) => {\n      const [mesA, anoA] = a.mes.split('/').map(Number);\n      const [mesB, anoB] = b.mes.split('/').map(Number);\n      return (anoA * 12 + mesA) - (anoB * 12 + mesB);\n    });\n\n    console.log('✓ Mês atual adicionado ao impostosMensais');\n  }\n}\n\n// ========================================\n// VALIDAÇÕES E LOGS\n// ========================================\nconsole.log('=== AGENTE 2 - PGDAS PROCESSADO ===');\nconsole.log('Tipo:', dadosExtraidos.somenteGuia ? 'Apenas DAS' : 'PGDAS Completo');\nconsole.log('Razão Social:', dadosExtraidos.razaoSocial);\nconsole.log('Receita Mês:', dadosExtraidos.receitaBrutaMes);\nconsole.log('Receita Acumulada:', dadosExtraidos.receitaBrutaAcumulada);\nconsole.log('Anexo:', dadosExtraidos.anexo);\nconsole.log('Fator R:', dadosExtraidos.aplicouFatorR ? 'Sim' : 'Não');\nconsole.log('Meses de Receita:', dadosExtraidos.receitasMensaisAnoCorrente.length);\nconsole.log('Meses de Folha:', dadosExtraidos.folhasMensais.length);\nconsole.log('Meses de Impostos:', dadosExtraidos.impostosMensais.length);  // ← NOVO\nconsole.log('Estabelecimentos:', dadosExtraidos.estabelecimentos.length);\n\n// Alerta se PGDAS completo mas sem histórico\nif (!dadosExtraidos.somenteGuia && dadosExtraidos.receitasMensaisAnoCorrente.length === 0) {\n  console.warn('⚠️ PGDAS completo, mas histórico de receitas não foi extraído!');\n}\n\n// ✅ Alerta se há múltiplos estabelecimentos\nif (dadosExtraidos.estabelecimentos.length > 1) {\n  console.log('✅ Múltiplos estabelecimentos detectados:', dadosExtraidos.estabelecimentos.length);\n}\n\n// ========================================\n// ESTRUTURA FINAL\n// ========================================\nreturn {\n  // === IDENTIFICAÇÃO ===\n  reportId: dadosOriginais.reportId,\n  documentoIndex: dadosOriginais.documentoIndex,\n  documentoNome: dadosOriginais.documentoNome,\n  clienteId: dadosOriginais.clienteId,\n  clienteNome: dadosOriginais.clienteNome,\n  regimeTributario: dadosOriginais.regimeTributario,\n\n  // === AGENTE ===\n  agenteProcessador: 'AGENTE_2_PGDAS',\n  confiancaClassificacao: dadosOriginais.confianca,\n\n  // === DADOS EXTRAÍDOS ===\n  razaoSocial: dadosExtraidos.razaoSocial,\n  cnpj: dadosExtraidos.cnpj,\n  periodo: dadosExtraidos.periodo,\n  receitaBrutaMes: dadosExtraidos.receitaBrutaMes,\n  receitaBrutaAcumulada: dadosExtraidos.receitaBrutaAcumulada,\n  aliquota: dadosExtraidos.aliquota,\n  valorDAS: dadosExtraidos.valorDAS,\n  anexo: dadosExtraidos.anexo,\n  aplicouFatorR: dadosExtraidos.aplicouFatorR,\n  dataVencimentoDAS: dadosExtraidos.dataVencimentoDAS,\n  comprasMes: dadosExtraidos.comprasMes,\n  comprasAcumuladas: dadosExtraidos.comprasAcumuladas,\n  somenteGuia: dadosExtraidos.somenteGuia,\n\n  // === DADOS HISTÓRICOS ===\n  receitasMensaisAnoCorrente: dadosExtraidos.receitasMensaisAnoCorrente,\n  folhasMensais: dadosExtraidos.folhasMensais,\n  impostosMensais: dadosExtraidos.impostosMensais,  // ← NOVO\n\n  // === ✅ ESTABELECIMENTOS (NOVO) ===\n  estabelecimentos: dadosExtraidos.estabelecimentos,\n\n  // === METADADOS ===\n  observacoes: dadosExtraidos.observacoes,\n  timestampProcessamento: new Date().toISOString(),\n  temErro: dadosExtraidos._erro || false,\n\n  // === DEBUG (remover em produção) ===\n  _debug: {\n    respostaOriginal: rawText.substring(0, 800),\n    file_uri: dadosOriginais.file_uri,\n    historicoExtraido: {\n      receitas: dadosExtraidos.receitasMensaisAnoCorrente.length > 0,\n      folhas: dadosExtraidos.folhasMensais.length > 0,\n      impostos: dadosExtraidos.impostosMensais.length > 0,  // ← NOVO\n      estabelecimentos: dadosExtraidos.estabelecimentos.length > 0\n    }\n  }\n};\n"
+      },
+      "id": "1adb2b67-1f82-44a5-82b4-4df04ccb6d00",
+      "name": "Code - Processar Agente 2",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4672,
+        960
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "564ef48a-3db8-4106-83d2-240ac92c7144",
+              "name": "systemInstruction.parts[0].text",
+              "value": "=# AGENTE 2 - EXTRATOR PGDAS\n\nExtraia dados do PGDAS do Simples Nacional, Relatório de Acumuladores ou Guia DAS.\n\n---\n\n## IDENTIFICAR TIPO DE DOCUMENTO\n\n**IMPORTANTE:** Identifique qual documento você está analisando:\n\n1. **PGDAS COMPLETO** (Relatório detalhado):\n   - Contém: Receita Bruta, RBT12, Alíquota, Anexo, Fator R\n   - Título: \"PGDAS-D\", \"Programa Gerador\", \"Declaração de Dados\"\n\n2. **RELATÓRIO DE ACUMULADORES**:\n   - Contém: Valores acumulados de 12 meses\n   - Seção: \"Receita Bruta Acumulada\", \"Compras 12 meses\"\n   - Geralmente em tabela com múltiplos períodos\n\n3. **GUIA DAS** (apenas boleto de pagamento):\n   - Contém: APENAS valor a pagar e vencimento\n   - NÃO contém: receita bruta, alíquota, anexo\n   - Título: \"Documento de Arrecadação do Simples Nacional\"\n\n---\n\n## EXTRAIR\n\n### **Dados Obrigatórios (presentes em todos os documentos):**\n1. **RAZÃO SOCIAL:** Nome empresarial completo (seção \"Informações do Contribuinte\" ou cabeçalho)\n2. **CNPJ** (XX.XXX.XXX/XXXX-XX)\n3. **Período** (MM/AAAA) - competência do documento\n4. **Valor do DAS** (Total a pagar)\n5. **Data Vencimento DAS**\n\n### **Dados do PGDAS Completo (se disponível):**\n6. **Receita Bruta do Mês** (RPA - Receita do Período de Apuração)\n7. **Receita Bruta Acumulada 12 meses** (RBT12 - Receita Bruta Total)\n8. **Alíquota** (percentual aplicado, apenas número sem %)\n9. **Anexo** (I, II, III, IV ou V)\n10. **Aplicou Fator R?** (true/false - verificar se há menção \"Fator r\" ou \"Anexo V\")\n\n### **Dados do Relatório de Acumuladores (se disponível):**\n11. **Total de Compras do Mês Atual**\n    - Busque em: \"Compras\" ou \"Aquisições\" ou \"Custo Mercadorias\" referente ao mês da competência\n    - Campo pode aparecer como: \"Compras (PA)\", \"Aquisições no mês\", \"Despesas com mercadorias\"\n\n12. **Compras Acumuladas 12 meses**\n    - Busque em: \"Compras (RBT12)\" ou \"Aquisições 12 meses\" ou \"Custo Mercadorias Acumulado\"\n    - Geralmente na mesma linha/coluna da RBT12\n\n---\n\n## 🆕 EXTRAÇÃO DE ESTABELECIMENTOS (MATRIZ/FILIAIS)\n\n**QUANDO EXTRAIR:**\n- Se o documento contém uma **TABELA** com receitas separadas por estabelecimento\n- Procure por colunas: \"Estabelecimento\", \"CNPJ\", \"Receita\", \"Alíquota\", \"Imposto\"\n- Identificadores comuns: \"MATRIZ\", \"FILIAL\", \"FILIAL 1\", \"FILIAL 2\", etc.\n\n**ESTRUTURA DA TABELA (exemplo do que procurar):**\n```\n| Estabelecimento    | Receita       | Alíquota | Imposto      |\n|--------------------|---------------|----------|--------------|\n| REVENDA (MATRIZ)   | 180.385,23   | 10,97%   | 19.781,67   |\n| REVENDA (FILIAL)   | 78.430,38    | 10,97%   | 8.600,95    |\n| TOTAL              | 258.815,61   |          | 28.382,62   |\n```\n\n**REGRAS DE EXTRAÇÃO:**\n1. **Se encontrar tabela de estabelecimentos:**\n   - Extraia CADA LINHA (exceto o TOTAL) como um objeto no array `estabelecimentos`\n   - Mantenha a descrição original do documento\n   - Não inclua a linha de TOTAL no array\n\n2. **Se houver apenas 1 estabelecimento:**\n   - Ainda assim crie o array com 1 item\n   - Use a descrição que aparece no documento\n\n3. **Se for apenas Guia DAS (sem tabela):**\n   - Deixe o array vazio: `estabelecimentos: []`\n\n4. **Se PGDAS não mostrar estabelecimentos separados:**\n   - Deixe o array vazio: `estabelecimentos: []`\n   - O sistema usará os valores consolidados\n\n**FORMATO DO ARRAY:**\n```json\n\"estabelecimentos\": [\n  {\n    \"descricao\": \"REVENDA (MATRIZ)\",\n    \"receita\": \"180.385,23\",\n    \"aliquota\": \"10,97\",\n    \"imposto\": \"19.781,67\"\n  },\n  {\n    \"descricao\": \"REVENDA (FILIAL)\",\n    \"receita\": \"78.430,38\",\n    \"aliquota\": \"10,97\",\n    \"imposto\": \"8.600,95\"\n  }\n]\n```\n\n**IMPORTANTE:**\n- Valores sem \"R$\" e com vírgula decimal\n- Alíquota apenas número com vírgula (ex: \"10,97\" não \"10,97%\")\n- Descrição exatamente como aparece no documento\n- Manter ordem: MATRIZ primeiro, depois FILIAIS\n\n---\n\n## REGRAS DE EXTRAÇÃO\n\n### **Para PGDAS Completo:**\n- RPA (Receita do Período) = faturamento do mês\n- RBT12 = soma dos últimos 12 meses\n- Alíquota: pegar o valor percentual aplicado (ex: 6,00%)\n- Anexo: identificar qual anexo está sendo usado (I a V)\n\n### **Para Relatório de Acumuladores:**\n- Procurar tabela com colunas: \"Período\", \"Receita\", \"Compras\"\n- Linha do mês atual: pegar valor da coluna \"Compras\"\n- Total acumulado: última linha ou linha \"Total\"\n- **ATENÇÃO:** Empresas de SERVIÇOS (Anexos III, IV, V) podem não ter compras\n\n### **Para Guia DAS apenas:**\n- Marcar flag `somenteGuia: true`\n- Preencher apenas: razão social, CNPJ, período, valor DAS, vencimento\n- Deixar outros campos como `null` ou \"0,00\"\n- **estabelecimentos** deve ser array vazio `[]`\n- **IMPORTANTE:** Indicar na observação que faltam dados\n\n---\n\n## FORMATO\n\n- Valores: `1.250,00` (brasileiro, sem R$)\n- Datas: `DD/MM/AAAA`\n- Razão social: texto completo como aparece no documento\n- Se não encontrar um campo, use `null` para texto ou `\"0,00\"` para valores\n\n---\n\n## EXTRAÇÃO DE DADOS HISTÓRICOS (OBRIGATÓRIO)\n\n### **13. Receitas Mensais do Ano Corrente**\n\n**Onde buscar:**\n- Seção: \"2.2) Receitas Brutas Anteriores (R$)\"\n- Subseção: \"2.2.1) Mercado Interno\"\n\n**O que extrair:**\n1. **TODOS os meses** que aparecem na seção 2.2.1, **incluindo meses de anos anteriores** (ex: 01/2024, 02/2024, etc.)\n2. **CRÍTICO:** Adicione também o mês da competência atual com o valor de `receitaBrutaMes`\n\n**Regras:**\n- **IMPORTANTE:** Incluir TODOS os meses listados na tabela 2.2.1, **não apenas do ano corrente**\n- Exemplo: se competência é 10/2025, extrair desde 01/2024 (ou o primeiro mês disponível) até 10/2025\n- O último item do array DEVE ser sempre o mês da competência\n- Manter ordem cronológica crescente (mês mais antigo primeiro, competência por último)\n- Se a seção 2.2 não existir, retornar array vazio `[]`\n- Se `somenteGuia: true`, retornar array vazio `[]`\n\n**Formato:** Array de objetos `{\"mes\": \"MM/AAAA\", \"valor\": \"0,00\"}`\n\n**Exemplo prático:**\n```\nDocumento com competência: 08/2025\nSeção 2.2.1 mostra:\n01/2025  10.250,00\n02/2025  9.125,00\n03/2025  11.300,00\n04/2025  8.000,00\n05/2025  8.000,00\n06/2025  8.000,00\n07/2025  8.000,00\n\nCampo \"Receita Bruta do PA\": 9.255,00\n```\n\n**Saída esperada:**\n```json\n\"receitasMensaisAnoCorrente\": [\n  {\"mes\": \"01/2025\", \"valor\": \"10.250,00\"},\n  {\"mes\": \"02/2025\", \"valor\": \"9.125,00\"},\n  {\"mes\": \"03/2025\", \"valor\": \"11.300,00\"},\n  {\"mes\": \"04/2025\", \"valor\": \"8.000,00\"},\n  {\"mes\": \"05/2025\", \"valor\": \"8.000,00\"},\n  {\"mes\": \"06/2025\", \"valor\": \"8.000,00\"},\n  {\"mes\": \"07/2025\", \"valor\": \"8.000,00\"},\n  {\"mes\": \"08/2025\", \"valor\": \"9.255,00\"}  ← ADICIONAR MÊS DA COMPETÊNCIA\n]\n```\n\n---\n\n### **14. Folhas de Pagamento Mensais**\n\n**Onde buscar:**\n- Seção: \"2.3) Folha de Salários Anteriores (R$)\"\n\n**O que extrair:**\n- TODOS os meses disponíveis (geralmente últimos 12 meses)\n\n**Regras:**\n- Extrair exatamente como aparecem no documento\n- Manter ordem cronológica crescente\n- Se a seção 2.3 não existir, retornar array vazio `[]`\n- Se `somenteGuia: true`, retornar array vazio `[]`\n- **OBSERVAÇÃO:** A folha do mês atual pode NÃO estar no histórico (é normal, pois pode ainda não ter sido fechada)\n\n**Formato:** Array de objetos `{\"mes\": \"MM/AAAA\", \"valor\": \"0,00\"}`\n\n**Exemplo prático:**\n```\nSeção 2.3 mostra:\n08/2024  2.558,32\n09/2024  2.561,18\n10/2024  2.558,32\n11/2024  2.558,32\n12/2024  2.558,32\n01/2025  2.616,91\n02/2025  2.587,62\n03/2025  2.644,25\n04/2025  2.558,32\n05/2025  2.558,32\n06/2025  2.558,32\n07/2025  2.558,32\n```\n\n**Saída esperada:**\n```json\n\"folhasMensais\": [\n  {\"mes\": \"08/2024\", \"valor\": \"2.558,32\"},\n  {\"mes\": \"09/2024\", \"valor\": \"2.561,18\"},\n  {\"mes\": \"10/2024\", \"valor\": \"2.558,32\"},\n  {\"mes\": \"11/2024\", \"valor\": \"2.558,32\"},\n  {\"mes\": \"12/2024\", \"valor\": \"2.558,32\"},\n  {\"mes\": \"01/2025\", \"valor\": \"2.616,91\"},\n  {\"mes\": \"02/2025\", \"valor\": \"2.587,62\"},\n  {\"mes\": \"03/2025\", \"valor\": \"2.644,25\"},\n  {\"mes\": \"04/2025\", \"valor\": \"2.558,32\"},\n  {\"mes\": \"05/2025\", \"valor\": \"2.558,32\"},\n  {\"mes\": \"06/2025\", \"valor\": \"2.558,32\"},\n  {\"mes\": \"07/2025\", \"valor\": \"2.558,32\"}\n]\n```\n\n---\n\n## ONDE BUSCAR CADA CAMPO\n\n| Campo | Onde Procurar |\n|-------|---------------|\n| Razão Social | Cabeçalho, \"Informações do Contribuinte\" |\n| CNPJ | Junto com razão social |\n| Período | \"Período de Apuração\", \"PA\", \"Competência\" |\n| RPA (mês) | \"Receita Bruta no Período de Apuração\" ou \"Receita Bruta do PA\" |\n| RBT12 | \"Receita Bruta acumulada nos 12 meses\" |\n| Alíquota | \"Alíquota\" ou calculada (Valor DAS / RPA × 100) |\n| Valor DAS | \"Valor devido\", \"Total a pagar\", maior valor em destaque |\n| Anexo | \"Anexo I\", \"Anexo II\", etc., ou pela atividade |\n| Fator R | Seção \"2.4) Fator r\" - se existir = true |\n| Compras Mês | Relatório Acumuladores → coluna \"Compras\" linha do mês |\n| Compras 12m | Relatório Acumuladores → linha \"Total\" coluna \"Compras\" |\n| Receitas Mensais | Seção \"2.2) Receitas Brutas Anteriores\" + competência atual |\n| Folhas Mensais | Seção \"2.3) Folha de Salários Anteriores\" |\n| **🆕 Estabelecimentos** | **Tabela com MATRIZ/FILIAL no corpo do documento** |\n\n---\n\n## SAÍDA JSON COMPLETA\n```json\n{\n  \"razaoSocial\": \"Nome empresarial completo\",\n  \"cnpj\": \"XX.XXX.XXX/XXXX-XX\",\n  \"periodo\": \"MM/AAAA\",\n  \"receitaBrutaMes\": \"0,00\",\n  \"receitaBrutaAcumulada\": \"0,00\",\n  \"aliquota\": \"0,00\",\n  \"valorDAS\": \"0,00\",\n  \"anexo\": null,\n  \"aplicouFatorR\": false,\n  \"dataVencimentoDAS\": \"DD/MM/AAAA\",\n  \"comprasMes\": \"0,00\",\n  \"comprasAcumuladas\": \"0,00\",\n  \"somenteGuia\": false,\n\n  \"estabelecimentos\": [\n    {\n      \"descricao\": \"REVENDA (MATRIZ)\",\n      \"receita\": \"180.385,23\",\n      \"aliquota\": \"10,97\",\n      \"imposto\": \"19.781,67\"\n    },\n    {\n      \"descricao\": \"REVENDA (FILIAL)\",\n      \"receita\": \"78.430,38\",\n      \"aliquota\": \"10,97\",\n      \"imposto\": \"8.600,95\"\n    }\n  ],\n\n  \"receitasMensaisAnoCorrente\": [\n    {\"mes\": \"01/2025\", \"valor\": \"10.250,00\"},\n    {\"mes\": \"02/2025\", \"valor\": \"9.125,00\"}\n  ],\n\n  \"folhasMensais\": [\n    {\"mes\": \"08/2024\", \"valor\": \"2.558,32\"},\n    {\"mes\": \"09/2024\", \"valor\": \"2.561,18\"}\n  ],\n\n  \"impostosMensais\": [\n    {\"mes\": \"01/2025\", \"valor\": \"5.420,10\"},\n    {\"mes\": \"02/2025\", \"valor\": \"3.907,10\"}\n  ],\n\n  \"observacoes\": \"\"\n}\n```\n\n---\n\n## CAMPOS ESPECIAIS\n\n### **somenteGuia** (boolean):\n- `true`: Se o documento é APENAS a guia de pagamento (DAS), sem dados de receita/alíquota\n- `false`: Se é PGDAS completo ou Relatório de Acumuladores\n\n### **estabelecimentos** (array):\n- Array de objetos com dados separados por MATRIZ/FILIAL\n- Vazio `[]` se: documento é só guia DAS, ou PGDAS não mostra estabelecimentos separados\n- Preenchido se: encontrar tabela com receitas por estabelecimento\n\n### **observacoes** (string):\nUse este campo para:\n- Indicar tipo de documento analisado\n- Alertar sobre campos que não foram encontrados\n- Mencionar particularidades (ex: \"Empresa sem compras - prestadora de serviços\")\n- Informar se históricos foram extraídos com sucesso\n- **🆕 Informar se estabelecimentos foram ou não identificados**\n\n---\n\n## EXEMPLOS DE OBSERVAÇÕES\n\n### **Caso 1: PGDAS Completo com histórico e estabelecimentos**\n```json\n\"observacoes\": \"Documento completo (PGDAS-D) analisado. Empresa de comércio (Anexo I). Fator R não se aplica. Histórico de 4 meses de receitas extraído. Não há histórico de folha de pagamento informado no documento. Identificados 2 estabelecimentos (MATRIZ e FILIAL).\"\n```\n\n### **Caso 2: PGDAS Completo sem separação de estabelecimentos**\n```json\n\"estabelecimentos\": [],\n\"observacoes\": \"Documento completo (PGDAS-D) analisado. Empresa de comércio (Anexo I). Fator R não se aplica. Histórico de 4 meses de receitas extraído. Valores consolidados (sem separação por estabelecimento).\"\n```\n\n### **Caso 3: Só Guia DAS**\n```json\n\"somenteGuia\": true,\n\"estabelecimentos\": [],\n\"receitasMensaisAnoCorrente\": [],\n\"folhasMensais\": [],\n\"observacoes\": \"O documento é apenas o Documento de Arrecadação (DAS), não o extrato PGDAS completo. Faltam informações de receita, alíquota, anexo e compras.\"\n```\n\n### **Caso 4: PGDAS sem histórico mas com estabelecimentos**\n```json\n\"estabelecimentos\": [\n  {\"descricao\": \"MATRIZ\", \"receita\": \"150.000,00\", \"aliquota\": \"10,97\", \"imposto\": \"16.455,00\"},\n  {\"descricao\": \"FILIAL 1\", \"receita\": \"80.000,00\", \"aliquota\": \"10,97\", \"imposto\": \"8.776,00\"}\n],\n\"receitasMensaisAnoCorrente\": [],\n\"folhasMensais\": [],\n\"impostosMensais\": [],\n\"observacoes\": \"PGDAS completo analisado. Identificados 2 estabelecimentos. As seções 2.2 e 2.3 não foram encontradas - histórico mensal não disponível neste documento.\"\n```\n\n---\n\n## EXTRAÇÃO DE IMPOSTOS MENSAIS (OBRIGATÓRIO)\n\n### **15. Impostos/DAS Mensais do Ano Corrente**\n\n**Onde buscar:**\n- Seção: \"Histórico de Pagamentos DAS\" ou \"Valores Pagos Anteriores\" (se existir no documento)\n- Pode aparecer em tabelas com coluna \"PA\" (Período de Apuração) e \"Valor Pago\"\n- Algumas versões do PGDAS podem ter uma seção mostrando DAS pagos mês a mês\n\n**O que extrair:**\n- TODOS os meses do ano atual que aparecem com valores de DAS/impostos pagos\n- **CRÍTICO:** SEMPRE incluir o mês da competência atual com o valor de `valorDAS`\n\n**Regras:**\n- Incluir APENAS meses do ano corrente (ex: se competência é 10/2025, incluir apenas 2025)\n- O último item do array DEVE ser sempre o mês da competência com `valorDAS`\n- Se não existir histórico no documento, criar array com APENAS o mês atual\n- Manter ordem cronológica crescente (janeiro primeiro, competência por último)\n- Se `somenteGuia: true`, retornar array com apenas o mês atual e `valorDAS`\n\n**Formato:** Array de objetos `{\"mes\": \"MM/AAAA\", \"valor\": \"0,00\"}`\n\n**Exemplo prático 1 - PGDAS com histórico:**\n```\nDocumento mostra:\nHistórico de Pagamentos:\n01/2025: R$ 5.420,10\n02/2025: R$ 3.907,10\n03/2025: R$ 3.150,60\n\nCompetência: 10/2025\nValor DAS: R$ 6.583,40\n```\n\n**Saída esperada:**\n```json\n\"impostosMensais\": [\n  {\"mes\": \"01/2025\", \"valor\": \"5.420,10\"},\n  {\"mes\": \"02/2025\", \"valor\": \"3.907,10\"},\n  {\"mes\": \"03/2025\", \"valor\": \"3.150,60\"},\n  {\"mes\": \"10/2025\", \"valor\": \"6.583,40\"}\n]\n```\n\n**Exemplo prático 2 - PGDAS sem histórico (MAIS COMUM):**\n```\nDocumento NÃO mostra histórico de pagamentos anteriores\n\nCompetência: 10/2025\nValor DAS: R$ 6.583,40\n```\n\n**Saída esperada:**\n```json\n\"impostosMensais\": [\n  {\"mes\": \"10/2025\", \"valor\": \"6.583,40\"}\n]\n```\n\n**Exemplo prático 3 - Apenas Guia DAS:**\n```\nDocumento é só a guia de pagamento\n\nCompetência: 08/2025\nValor DAS: R$ 555,31\n```\n\n**Saída esperada:**\n```json\n\"somenteGuia\": true,\n\"impostosMensais\": [\n  {\"mes\": \"08/2025\", \"valor\": \"555,31\"}\n]\n```\n\n**IMPORTANTE:**\n- Se não encontrar histórico de pagamentos, NÃO deixe o array vazio\n- SEMPRE inclua pelo menos o mês atual com `valorDAS`\n- O mês da competência DEVE aparecer no array (mesmo que seja o único)\n\n---\n\n## VALIDAÇÕES IMPORTANTES\n\n1. **Se `valorDAS` for o único campo preenchido:**\n   - Marcar `somenteGuia: true`\n   - Arrays de histórico devem ser vazios `[]`\n   - Array `estabelecimentos` deve ser vazio `[]`\n   - Preencher observação indicando que faltam dados\n\n2. **Se `receitaBrutaAcumulada` > 0 mas `receitaBrutaMes` = 0:**\n   - Alertar na observação: \"RBT12 encontrada, mas RPA do mês não identificada\"\n\n3. **Se Anexo = I ou II (comércio) e compras = 0:**\n   - Alertar: \"Anexo de comércio mas sem compras registradas - verificar\"\n\n4. **Se encontrar Fator R aplicado:**\n   - Marcar `aplicouFatorR: true`\n   - Mencionar na observação\n\n5. **Se `receitasMensaisAnoCorrente` estiver vazio em PGDAS completo:**\n   - Mencionar na observação: \"Seção 2.2 não encontrada - histórico de receitas indisponível\"\n\n6. **Validação crítica - Mês da competência:**\n   - O último item de `receitasMensaisAnoCorrente` DEVE ser o mês da competência\n   - Se `periodo = \"08/2025\"`, o array deve terminar com `{\"mes\": \"08/2025\", \"valor\": \"9.255,00\"}`\n\n7. **🆕 Validação de estabelecimentos:**\n   - Se encontrar tabela, array NÃO pode estar vazio\n   - Soma das receitas dos estabelecimentos DEVE = `receitaBrutaMes`\n   - Soma dos impostos dos estabelecimentos DEVE = `valorDAS`\n\n8. **🆕 Validação de impostos mensais (CRÍTICA):**\n   - Array `impostosMensais` NUNCA pode estar vazio\n   - SEMPRE deve conter pelo menos o mês da competência com `valorDAS`\n   - Se `periodo = \"10/2025\"` e `valorDAS = \"6.583,40\"`, o array DEVE ter: `[{\"mes\": \"10/2025\", \"valor\": \"6.583,40\"}]`\n   - Se encontrar histórico, incluir todos os meses + competência atual\n\n---\n\n## EXEMPLOS COMPLETOS\n\n### **Exemplo 1: PGDAS Completo com Estabelecimentos (Ideal)**\n```json\n{\n  \"razaoSocial\": \"COMERCIO DOS OCULOS E RELOJOARIA LTDA\",\n  \"cnpj\": \"20.330.344/0001-76\",\n  \"periodo\": \"04/2024\",\n  \"receitaBrutaMes\": \"258.815,61\",\n  \"receitaBrutaAcumulada\": \"2.618.749,82\",\n  \"aliquota\": \"10,97\",\n  \"valorDAS\": \"28.382,62\",\n  \"anexo\": \"I\",\n  \"aplicouFatorR\": false,\n  \"dataVencimentoDAS\": \"20/05/2024\",\n  \"comprasMes\": \"0,00\",\n  \"comprasAcumuladas\": \"0,00\",\n  \"somenteGuia\": false,\n\n  \"estabelecimentos\": [\n    {\n      \"descricao\": \"REVENDA (MATRIZ)\",\n      \"receita\": \"180.385,23\",\n      \"aliquota\": \"10,97\",\n      \"imposto\": \"19.781,67\"\n    },\n    {\n      \"descricao\": \"REVENDA (FILIAL)\",\n      \"receita\": \"78.430,38\",\n      \"aliquota\": \"10,97\",\n      \"imposto\": \"8.600,95\"\n    }\n  ],\n\n  \"receitasMensaisAnoCorrente\": [\n    {\"mes\": \"01/2024\", \"valor\": \"165.830,09\"},\n    {\"mes\": \"02/2024\", \"valor\": \"196.483,76\"},\n    {\"mes\": \"03/2024\", \"valor\": \"200.962,62\"},\n    {\"mes\": \"04/2024\", \"valor\": \"258.815,61\"}\n  ],\n\n  \"folhasMensais\": [],\n\n  \"impostosMensais\": [\n    {\"mes\": \"04/2024\", \"valor\": \"28.382,62\"}\n  ],\n\n  \"observacoes\": \"Documento completo (PGDAS-D) analisado. Empresa de comércio (Anexo I). Fator R não se aplica. Histórico de 4 meses de receitas extraído. Não há histórico de folha de pagamento informado no documento. Identificados 2 estabelecimentos: MATRIZ (R$ 180.385,23) e FILIAL (R$ 78.430,38).\"\n}\n```\n\n### **Exemplo 2: PGDAS Completo sem Estabelecimentos**\n```json\n{\n  \"razaoSocial\": \"R. FURQUIM RODRIGUES\",\n  \"cnpj\": \"22.772.457/0001-57\",\n  \"periodo\": \"08/2025\",\n  \"receitaBrutaMes\": \"9.255,00\",\n  \"receitaBrutaAcumulada\": \"102.785,00\",\n  \"aliquota\": \"6,00\",\n  \"valorDAS\": \"555,31\",\n  \"anexo\": \"III\",\n  \"aplicouFatorR\": true,\n  \"dataVencimentoDAS\": \"22/09/2025\",\n  \"comprasMes\": \"0,00\",\n  \"comprasAcumuladas\": \"0,00\",\n  \"somenteGuia\": false,\n\n  \"estabelecimentos\": [],\n\n  \"receitasMensaisAnoCorrente\": [\n    {\"mes\": \"01/2025\", \"valor\": \"10.250,00\"},\n    {\"mes\": \"02/2025\", \"valor\": \"9.125,00\"},\n    {\"mes\": \"03/2025\", \"valor\": \"11.300,00\"},\n    {\"mes\": \"04/2025\", \"valor\": \"8.000,00\"},\n    {\"mes\": \"05/2025\", \"valor\": \"8.000,00\"},\n    {\"mes\": \"06/2025\", \"valor\": \"8.000,00\"},\n    {\"mes\": \"07/2025\", \"valor\": \"8.000,00\"},\n    {\"mes\": \"08/2025\", \"valor\": \"9.255,00\"}\n  ],\n\n  \"folhasMensais\": [\n    {\"mes\": \"08/2024\", \"valor\": \"2.558,32\"},\n    {\"mes\": \"09/2024\", \"valor\": \"2.561,18\"},\n    {\"mes\": \"10/2024\", \"valor\": \"2.558,32\"},\n    {\"mes\": \"11/2024\", \"valor\": \"2.558,32\"},\n    {\"mes\": \"12/2024\", \"valor\": \"2.558,32\"},\n    {\"mes\": \"01/2025\", \"valor\": \"2.616,91\"},\n    {\"mes\": \"02/2025\", \"valor\": \"2.587,62\"},\n    {\"mes\": \"03/2025\", \"valor\": \"2.644,25\"},\n    {\"mes\": \"04/2025\", \"valor\": \"2.558,32\"},\n    {\"mes\": \"05/2025\", \"valor\": \"2.558,32\"},\n    {\"mes\": \"06/2025\", \"valor\": \"2.558,32\"},\n    {\"mes\": \"07/2025\", \"valor\": \"2.558,32\"}\n  ],\n\n  \"impostosMensais\": [\n    {\"mes\": \"08/2025\", \"valor\": \"555,31\"}\n  ],\n\n  \"observacoes\": \"Documento completo (PGDAS-D) analisado. Empresa prestadora de serviços (Anexo III), Fator R aplicado (0,30). Não há registro de compras. Histórico de 8 meses de receitas e 12 meses de folha extraídos com sucesso. Valores consolidados (estabelecimento único).\"\n}\n```\n\n### **Exemplo 3: Guia DAS apenas**\n```json\n{\n  \"razaoSocial\": \"R. FURQUIM RODRIGUES\",\n  \"cnpj\": \"22.772.457/0001-57\",\n  \"periodo\": \"08/2025\",\n  \"receitaBrutaMes\": \"0,00\",\n  \"receitaBrutaAcumulada\": \"0,00\",\n  \"aliquota\": \"0,00\",\n  \"valorDAS\": \"555,31\",\n  \"anexo\": null,\n  \"aplicouFatorR\": false,\n  \"dataVencimentoDAS\": \"22/09/2025\",\n  \"comprasMes\": \"0,00\",\n  \"comprasAcumuladas\": \"0,00\",\n  \"somenteGuia\": true,\n\n  \"estabelecimentos\": [],\n  \"receitasMensaisAnoCorrente\": [],\n  \"folhasMensais\": [],\n  \"impostosMensais\": [\n    {\"mes\": \"08/2025\", \"valor\": \"555,31\"}\n  ],\n\n  \"observacoes\": \"O documento é apenas o Documento de Arrecadação (DAS), não o extrato PGDAS completo. Faltam informações de receita, alíquota, anexo e compras.\"\n}\n```\n\n---\n\n\"Se 'aliquota' não estiver explícita no documento, calcule usando a fórmula:\naliquota = (valorDAS / receitaBrutaMes) * 100\nFormate com 2 casas decimais.\n\nIMPORTANTE: NUNCA retorne aliquota como '0,00' se valorDAS e receitaBrutaMes existirem!\"\n\n## ATENÇÃO FINAL\n\n- **Sempre preencha `somenteGuia`** - é crucial para o sistema saber se faltam dados\n- **Sempre inicialize `estabelecimentos`** - mesmo que vazio `[]`\n- **Seja específico nas observações** - ajuda a entender limitações da análise\n- **Compras são opcionais** - empresas de serviços geralmente não têm\n- **CRÍTICO: Sempre adicione o mês da competência** no final de `receitasMensaisAnoCorrente`\n- **🆕 Se encontrar tabela de estabelecimentos, SEMPRE extraia** - não ignore\n- **🆕 Mantenha ordem: MATRIZ primeiro, depois FILIAIS** - facilita leitura\n- **Se tiver dúvida sobre um campo:** melhor deixar `null` ou \"0,00\" e explicar na observação",
+              "type": "string"
+            },
+            {
+              "id": "6d4a0eb7-1d0d-4909-91e5-7b3f83425d45",
+              "name": "contents",
+              "value": "=[\n  {\n    \"role\": \"user\",\n    \"parts\": [\n      {\n        \"text\": \"Cliente: {{ $json[\"clienteNome\"] }}\\nCNPJ: {{ $json[\"cnpjDetectado\"] }}\\nPeriodo: {{ $json[\"periodoDetectado\"] }}\\n\\nExtraia todas as entradas.\"\n      }\n    ]\n  },\n  {\n    \"role\": \"user\",\n    \"parts\": [\n      {\n        \"file_data\": {\n          \"file_uri\": \"{{ $json[\"file_uri\"] }}\",\n          \"mime_type\": \"{{ $json[\"mime_type\"] }}\"\n        }\n      }\n    ]\n  }\n]\n",
+              "type": "array"
+            },
+            {
+              "id": "4fb5ff3e-57fa-48c9-be26-870d60f440a2",
+              "name": "generationConfig.temperature",
+              "value": 0.1,
+              "type": "number"
+            },
+            {
+              "id": "6052f418-c7b9-428d-ac06-07c47b0232ea",
+              "name": "generationConfig.maxOutputTokens",
+              "value": 5000,
+              "type": "number"
+            },
+            {
+              "id": "0a6c857e-8932-44fc-af2a-98e5310023f9",
+              "name": "generationConfig.responseMimeType",
+              "value": "application/json",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        3168,
+        960
+      ],
+      "id": "1bfc12b3-2b98-4c3a-90ea-1ffd5e378c29",
+      "name": "Requisição para o Agente 2"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json[\"tipo\"] }}",
+                    "rightValue": "EXTRATO_BANCARIO",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "7a1f6cff-113d-4c16-94ea-cb66883012cd"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "0"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "6a83f7a5-e95b-4dbd-8bc3-0b3ddcc66006",
+                    "leftValue": "={{ $json[\"tipo\"] }}",
+                    "rightValue": "EXTRATO_CARTAO",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "0"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "2b96a2fe-db77-4cdb-a7ec-a27cafb95c86",
+                    "leftValue": "={{ $json[\"tipo\"] }}",
+                    "rightValue": "PGDAS_XML",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "1"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "909dff3a-2c20-4e43-95f5-3cab84f6dba3",
+                    "leftValue": "={{ $json[\"tipo\"] }}",
+                    "rightValue": "PGDAS_PDF",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "1"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "965a6f71-c58d-4266-a301-a07ed5d0c86a",
+                    "leftValue": "={{ $json[\"tipo\"] }}",
+                    "rightValue": "GUIA_DAS",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "1"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "4f6d230d-7638-40cc-b520-e897b823c042",
+                    "leftValue": "={{ $json[\"tipo\"] }}",
+                    "rightValue": "FOLHA_PAGAMENTO",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "2"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "ebb95e37-12a2-4a5a-8efd-49bab456f136",
+                    "leftValue": "={{ $json[\"tipo\"] }}",
+                    "rightValue": "NFE_XML",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "3"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "e6c88cc7-5183-43b8-a206-7ccb230404e2",
+                    "leftValue": "={{ $json[\"tipo\"] }}",
+                    "rightValue": "NFSE_XML",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "3"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "93f7d8bd-3eb6-48f3-8b09-05a69cfa9e76",
+                    "leftValue": "={{ $json[\"tipo\"] }}",
+                    "rightValue": "NFSE_PDF",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "3"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "af44d7e5-4763-4ed9-b25c-71a76ef5812e",
+                    "leftValue": "={{ $json[\"tipo\"] }}",
+                    "rightValue": "CTE_XML",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "3"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 2
+                },
+                "conditions": [
+                  {
+                    "id": "4b26bf94-e08a-466f-80fc-11bcdb688eb1",
+                    "leftValue": "={{ $json[\"tipo\"] }}",
+                    "rightValue": "RESUMO_ACUMULADOR",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "3"
+            }
+          ]
+        },
+        "options": {
+          "fallbackOutput": "extra"
+        }
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.2,
+      "position": [
+        2752,
+        896
+      ],
+      "id": "4ffbdae9-83a0-4122-96ae-7ff5c8de3308",
+      "name": "Rotear por Tipo"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "key",
+              "value": "AIzaSyBJvGsG5No83LNgHU_kqh10f4Tgo4cevx8"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json }}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "2ec7b483-501a-4a94-8505-81bdfdc3aefb",
+      "name": "HTTP - Agente 1 Extrator Financeiro",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        3360,
+        800
+      ],
+      "typeVersion": 4.2,
+      "retryOnFail": true,
+      "retrySettings": {
+        "maxTries": 2
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const geminiResponse = $input.item.json;\nconst dadosOriginais = $input.first().json;\n\n// Extrai o JSON da resposta\nconst rawText = geminiResponse.candidates?.[0]?.content?.parts?.[0]?.text || '{}';\nconst cleanText = rawText.replace(/```json|```/g, '').trim();\n\n// Parse seguro\nlet dadosExtraidos;\ntry {\n  dadosExtraidos = JSON.parse(cleanText);\n  \n  // Valida se tem campos obrigatórios\n  if (!dadosExtraidos.totalMovimentoReal) {\n    throw new Error('Resposta incompleta - falta totalMovimentoReal');\n  }\n  \n} catch (error) {\n  console.error('❌ Erro ao processar Agente 1:', error.message);\n  console.error('📄 Resposta recebida:', rawText);\n  \n  // Fallback com estrutura vazia\n  dadosExtraidos = {\n    cnpj: dadosOriginais.cnpjDetectado,\n    periodo: dadosOriginais.periodoDetectado,\n    banco: 'Não identificado',\n    vendasCartao: {\n      stone: '0,00',\n      cielo: '0,00',\n      pagBank: '0,00',\n      rede: '0,00',\n      getnet: '0,00',\n      mercadoPago: '0,00',\n      outras: '0,00',\n      total: '0,00'\n    },\n    pix: { total: '0,00', quantidade: 0 },\n    depositos: { total: '0,00', quantidade: 0 },\n    transferenciasRecebidas: { total: '0,00', quantidade: 0, detalhes: '' },  // ← ADICIONADO\n    transferenciasEntreCnpjs: { total: '0,00', quantidade: 0, detalhes: '' },\n    totalMovimentoReal: '0,00',\n    observacoes: `Erro: ${error.message}`,\n    _erro: true\n  };\n}\n\n// Função para converter valores BR para número\nconst parseValorBR = (valor) => {\n  if (!valor || valor === '0,00') return 0;\n  return parseFloat(valor.replace(/\\./g, '').replace(',', '.'));\n};\n\n// ========================================\n// VALIDAÇÃO CORRIGIDA DO CÁLCULO\n// ========================================\n\nconst totalCartao = parseValorBR(dadosExtraidos.vendasCartao?.total);\nconst totalPix = parseValorBR(dadosExtraidos.pix?.total);\nconst totalDepositos = parseValorBR(dadosExtraidos.depositos?.total);\nconst totalTransfRecebidas = parseValorBR(dadosExtraidos.transferenciasRecebidas?.total);  // ← ADICIONADO\nconst totalTransfEntreCnpjs = parseValorBR(dadosExtraidos.transferenciasEntreCnpjs?.total);\n\n// CÁLCULO CORRETO\nconst movimentoCalculado = totalCartao + totalPix + totalDepositos + totalTransfRecebidas - totalTransfEntreCnpjs;\n\nconst movimentoInformado = parseValorBR(dadosExtraidos.totalMovimentoReal);\nconst diferenca = Math.abs(movimentoCalculado - movimentoInformado);\n\n// Log para debug\nconsole.log('=== VALIDAÇÃO MOVIMENTO FINANCEIRO ===');\nconsole.log('Vendas Cartão:', totalCartao.toFixed(2));\nconsole.log('PIX:', totalPix.toFixed(2));\nconsole.log('Depósitos:', totalDepositos.toFixed(2));\nconsole.log('Transf. Recebidas:', totalTransfRecebidas.toFixed(2));\nconsole.log('Transf. Entre CNPJs:', totalTransfEntreCnpjs.toFixed(2));\nconsole.log('Movimento Calculado:', movimentoCalculado.toFixed(2));\nconsole.log('Movimento Informado:', movimentoInformado.toFixed(2));\nconsole.log('Diferença:', diferenca.toFixed(2));\nconsole.log('Cálculo Correto?', diferenca < 0.01 ? '✅' : '❌');\n\n// Retorna estrutura completa\nreturn {\n  // === IDENTIFICAÇÃO ===\n  reportId: dadosOriginais.reportId,\n  documentoIndex: dadosOriginais.documentoIndex,\n  documentoNome: dadosOriginais.documentoNome,\n  clienteId: dadosOriginais.clienteId,\n  clienteNome: dadosOriginais.clienteNome,\n  regimeTributario: dadosOriginais.regimeTributario,\n  \n  // === DADOS EXTRAÍDOS ===\n  agenteProcessador: 'AGENTE_1_EXTRATOS',\n  cnpj: dadosExtraidos.cnpj,\n  razaoSocial: dadosExtraidos.razaoSocial,\n  confiancaClassificacao: dadosOriginais.confianca,\n  \n  // Dados extraídos (spread mantém tudo)\n  ...dadosExtraidos,\n  \n  // Validação de cálculo CORRIGIDA\n  validacao: {\n    movimentoCalculado: movimentoCalculado.toFixed(2).replace('.', ','),\n    movimentoInformado: dadosExtraidos.totalMovimentoReal,\n    diferencaAbsoluta: diferenca.toFixed(2),\n    calculoCorreto: diferenca < 0.01,\n    detalhamento: {\n      vendasCartao: totalCartao.toFixed(2),\n      pix: totalPix.toFixed(2),\n      depositos: totalDepositos.toFixed(2),\n      transferenciasRecebidas: totalTransfRecebidas.toFixed(2),\n      transferenciasEntreCnpjs: totalTransfEntreCnpjs.toFixed(2)\n    }\n  },\n  \n  // Metadados\n  timestampProcessamento: new Date().toISOString(),\n  temErro: dadosExtraidos._erro || false,\n  \n  // Debug (remover em produção)\n  _debug: {\n    respostaOriginal: rawText.substring(0, 500),\n    file_uri: dadosOriginais.file_uri\n  }\n};"
+      },
+      "id": "92f15ef2-394e-4e6e-8b5e-73d27d62064a",
+      "name": "Code - Processar Agente 1",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        4672,
+        800
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "564ef48a-3db8-4106-83d2-240ac92c7144",
+              "name": "systemInstruction.parts[0].text",
+              "value": "=# AGENTE 1 - EXTRATOR FINANCEIRO\n\nExtraia receitas de extratos bancários.\n\n---\n\n## EXTRAIR\n\n1. **RAZÃO SOCIAL:** Nome completo da empresa no cabeçalho do extrato\n2. **VENDAS CARTÃO:** Stone, Cielo, PagBank, Rede, GetNet, Mercado Pago  \n3. **PIX RECEBIDOS:** \"Pix recebido\", \"PIX Recebido\"  \n4. **TRANSFERÊNCIAS RECEBIDAS:** \"Transferência recebida\", \"TED recebida\", \"DOC recebida\" (se de **terceiros**, é receita!)  \n5. **DEPÓSITOS:** \"Depósito em dinheiro\", \"Dep Envelope\"  \n6. **TRANSFERÊNCIAS ENTRE CNPJs:** apenas se explícito \"mesma titularidade\"\n\n---\n\n## REGRAS\n\n- **Transferência recebida de terceiros = RECEITA** (some em `transferenciasRecebidas`)  \n- Linha com **+** = receita  \n- Linha com **-** = despesa (ignore)  \n- Subtraia **apenas** se explícito \"mesma titularidade\"\n\n---\n\n## FORMATO\n\n- Valores no formato brasileiro: `1.250,00`  \n- Sem símbolo `R$`\n- Razão social: texto completo como aparece no documento\n\n---\n\n## SAÍDA JSON\n```json\n{\n  \"razaoSocial\": \"Nome completo da empresa\",\n  \"cnpj\": \"XX.XXX.XXX/XXXX-XX\",\n  \"periodo\": \"MM/AAAA\",\n  \"banco\": \"nome\",\n  \"vendasCartao\": {\n    \"stone\": \"0,00\",\n    \"cielo\": \"0,00\",\n    \"pagBank\": \"0,00\",\n    \"rede\": \"0,00\",\n    \"getnet\": \"0,00\",\n    \"mercadoPago\": \"0,00\",\n    \"outras\": \"0,00\",\n    \"total\": \"0,00\"\n  },\n  \"pix\": {\n    \"total\": \"0,00\",\n    \"quantidade\": 0\n  },\n  \"transferenciasRecebidas\": {\n    \"total\": \"0,00\",\n    \"quantidade\": 0,\n    \"detalhes\": \"\"\n  },\n  \"depositos\": {\n    \"total\": \"0,00\",\n    \"quantidade\": 0\n  },\n  \"transferenciasEntreCnpjs\": {\n    \"total\": \"0,00\",\n    \"quantidade\": 0\n  },\n  \"totalMovimentoReal\": \"0,00\"\n}\n\nCÁLCULO\ntotalMovimentoReal = vendasCartao.total + pix.total + transferenciasRecebidas.total + depositos.total - transferenciasEntreCnpjs.total",
+              "type": "string"
+            },
+            {
+              "id": "6d4a0eb7-1d0d-4909-91e5-7b3f83425d45",
+              "name": "contents",
+              "value": "=[\n  {\n    \"role\": \"user\",\n    \"parts\": [\n      {\n        \"text\": \"Cliente: {{ $json[\"clienteNome\"] }}\\nCNPJ: {{ $json[\"cnpjDetectado\"] }}\\nPeriodo: {{ $json[\"periodoDetectado\"] }}\\n\\nExtraia todas as entradas.\"\n      }\n    ]\n  },\n  {\n    \"role\": \"user\",\n    \"parts\": [\n      {\n        \"file_data\": {\n          \"file_uri\": \"{{ $json[\"file_uri\"] }}\",\n          \"mime_type\": \"{{ $json[\"mime_type\"] }}\"\n        }\n      }\n    ]\n  }\n]\n",
+              "type": "array"
+            },
+            {
+              "id": "4fb5ff3e-57fa-48c9-be26-870d60f440a2",
+              "name": "generationConfig.temperature",
+              "value": 0.1,
+              "type": "number"
+            },
+            {
+              "id": "6052f418-c7b9-428d-ac06-07c47b0232ea",
+              "name": "generationConfig.maxOutputTokens",
+              "value": 5000,
+              "type": "number"
+            },
+            {
+              "id": "0a6c857e-8932-44fc-af2a-98e5310023f9",
+              "name": "generationConfig.responseMimeType",
+              "value": "application/json",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        3168,
+        800
+      ],
+      "id": "317916a0-fce4-4c9e-bea8-2b86c4ea3abf",
+      "name": "Requisição para o Agente 1"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "8c1500d9-23e9-484c-8faf-08488e5ee1d8",
+      "typeVersion": 1.1,
+      "name": "Start",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "position": [
+        2304,
+        1056
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Agente 1 - Extrator Financeiro\n\nExtrai receitas de extratos bancários identificando movimentações financeiras.\n\n### O que extrai\n- **Vendas em cartão** - Stone, Cielo, PagBank, Rede, GetNet, Mercado Pago\n- **PIX recebidos** - Total e quantidade\n- **Transferências recebidas** - De terceiros (receita)\n- **Depósitos** - Em dinheiro ou envelope\n- **Transferências entre CNPJs** - Mesma titularidade (subtrai)\n\n### Regras\n✓ Linha com **+** = receita (soma)  \n✓ Linha com **-** = despesa (ignora)  \n✓ Transferência de terceiros = **RECEITA**  \n✓ Transferência mesma titularidade = subtrai\n\n### Output\nRetorna JSON com:\n- Razão social e CNPJ\n- Vendas por bandeira de cartão\n- PIX, transferências e depósitos (total + quantidade)\n- **Total movimento real** calculado automaticamente",
+        "height": 560,
+        "width": 576
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        2160,
+        96
+      ],
+      "typeVersion": 1,
+      "id": "a49b7bba-3d6a-4709-8638-f791715ad380",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "content": "## Agente 2 - PGDAS (Simples Nacional)\n\nExtrai dados fiscais e tributários do PGDAS-D, Relatório de Acumuladores ou Guia DAS.\n\n### O que extrai\n**Dados básicos:**\n- Receita bruta mensal (RPA) e acumulada 12m (RBT12)\n- Alíquota, Anexo (I-V) e Fator R\n- Valor DAS e data de vencimento\n\n**Históricos:**\n- Receitas mensais do ano (seção 2.2 + competência atual)\n- Folhas mensais (seção 2.3)\n- Impostos/DAS mensais (sempre inclui competência)\n\n**Estabelecimentos:**\n- Extrai tabela MATRIZ/FILIAL (se houver)\n- Receita, alíquota e imposto por estabelecimento\n\n**Compras (se disponível):**\n- Compras do mês e acumuladas 12m\n\n### Validações\n✓ Identifica tipo de documento (PGDAS completo vs. apenas Guia)  \n✓ Calcula alíquota se não explícita no documento  \n✓ Valida soma de estabelecimentos vs. total  \n✓ Flag `somenteGuia` quando faltam dados\n\n### Output\nJSON estruturado com todos os campos + observações detalhadas sobre o que foi ou não encontrado\n",
+        "height": 688,
+        "width": 736
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        2768,
+        -32
+      ],
+      "typeVersion": 1,
+      "id": "857a758f-5efb-417f-bd51-fbfa0fcdfadd",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "## Agente 3 - Folha de Pagamento\n\nExtrai totalizadores de encargos trabalhistas da folha de pagamento.\n\n### O que extrai\n- **Salário Bruto Total**\n- **INSS Empresa** (~20% ou campo \"Empresa\"/\"Segurados\")\n- **FGTS** (8% ou campo \"Valor do FGTS\")\n- **Quantidade de Funcionários** (contagem de colaboradores)\n- **Total Líquido Pago**\n\n### Cálculo Automático\n`Total Custo Folha = Salário Bruto + INSS Empresa + FGTS`\n\n### Validações\n✓ Se não houver FGTS ou INSS, preenche com \"0,00\"  \n✓ Busca campo \"Empresa\" na seção INSS (não confundir com desconto funcionário)\n\n### Output\nJSON com totalizadores consolidados + custo total da folha calculado\n",
+        "height": 496,
+        "width": 592
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        3536,
+        160
+      ],
+      "typeVersion": 1,
+      "id": "f929bf38-164d-4241-a967-cff6244096c0",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "content": "## Agente 4 - Notas Fiscais\n\nExtrai dados de NFS-e, NF-e, CT-e ou Resumo por Acumulador.\n\n### Cenários suportados\n1. **Nota única** - Extrai número, data, valor, CNPJs, impostos\n2. **Relatório de Notas** - Período, quantidade, total, canceladas, gaps\n3. **Resumo por Acumulador** - Entradas (compras), Saídas (devoluções), Serviços\n\n### O que extrai\n**Faturamento:**\n- Quantidade de notas e faturamento total\n- Notas canceladas e gaps de numeração\n\n**Impostos retidos:**\n- ISS, IRRF, PIS, COFINS (total calculado)\n\n**Compras (Resumo por Acumulador):**\n- **ENTRADAS** - Array com código CFOP, descrição e valor\n- **SAÍDAS** - Array com devoluções\n- **SERVIÇOS** - Total vai para `faturamentoTotal`\n\n### Validações\n✓ Identifica tipo de documento automaticamente  \n✓ Detecta gaps na numeração (ex: 100, 101, 104 → gap: 102, 103)  \n✓ Separa compras (entradas) de devoluções (saídas)\n\n### Output\nJSON estruturado com:\n- Dados fiscais (quantidade, faturamento, impostos)\n- Arrays de ENTRADAS e SAÍDAS (se Resumo por Acumulador)\n- Observações sobre particularidades do documento\n",
+        "height": 752,
+        "width": 592
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        4160,
+        -96
+      ],
+      "typeVersion": 1,
+      "id": "60ecfedf-8964-4f49-bc11-7b937aba65f8",
+      "name": "Sticky Note3"
+    },
+    {
+      "parameters": {
+        "mode": "chooseBranch",
+        "useDataOfInput": 2
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        2576,
+        1056
+      ],
+      "id": "80a8900b-a761-4595-a41c-01ade0a003f0",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "action": "generate"
+      },
+      "type": "n8n-nodes-base.crypto",
+      "typeVersion": 1,
+      "position": [
+        2560,
+        704
+      ],
+      "id": "868429f0-4837-4a23-acbd-9d756513b179",
+      "name": "Crypto"
+    },
+    {
+      "parameters": {
+        "operation": "set",
+        "key": "={{ $json.data }}",
+        "value": "={{ $json.toJsonString() }}"
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        2752,
+        704
+      ],
+      "id": "1c3fde87-e811-41a3-b24a-7dcf3edc24a0",
+      "name": "Redis",
+      "credentials": {
+        "redis": {
+          "id": "mH20kC0zOKTkm5ba",
+          "name": "Redis account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "numberInputs": 4
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        3760,
+        1184
+      ],
+      "id": "85c9b784-6629-4663-aff1-7f463645bb9e",
+      "name": "Merge6"
+    },
+    {
+      "parameters": {
+        "numberInputs": 4
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        4288,
+        992
+      ],
+      "id": "9497a78c-8eaf-41e3-88ad-57f4be44224f",
+      "name": "Merge7"
+    },
+    {
+      "parameters": {
+        "amount": 1,
+        "unit": "minutes"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        4848,
+        1408
+      ],
+      "id": "ad563ec2-5bde-4434-842e-8cd6a77523da",
+      "name": "Wait",
+      "webhookId": "cddad311-8324-4dda-a1ec-f5806fcf863d"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "propertyName": "body",
+        "key": "={{ $item(\"0\").$node[\"Crypto\"].json[\"data\"] }}",
+        "options": {}
+      },
+      "id": "ad0937d0-5fc4-4076-90e8-305841715a98",
+      "name": "Pega o body na memoria temporária",
+      "type": "n8n-nodes-base.redis",
+      "position": [
+        4128,
+        1408
+      ],
+      "typeVersion": 1,
+      "credentials": {
+        "redis": {
+          "id": "mH20kC0zOKTkm5ba",
+          "name": "Redis account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "14f1ad60-10f1-4669-bdbb-039e7aa301a8",
+              "name": "body",
+              "type": "object",
+              "value": "={{ $json.body }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "eb36bfe5-8463-499d-9466-e27486888540",
+      "name": "transforma em obj1",
+      "type": "n8n-nodes-base.set",
+      "position": [
+        4304,
+        1408
+      ],
+      "typeVersion": 3.4
+    },
+    {
+      "parameters": {
+        "fieldsToAggregate": {
+          "fieldToAggregate": [
+            {
+              "fieldToAggregate": "body"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "c121aacf-27a0-4e30-a859-8e8cf984d977",
+      "name": "tira de obj e coloca em lista1",
+      "type": "n8n-nodes-base.aggregate",
+      "position": [
+        4496,
+        1408
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "body",
+        "options": {}
+      },
+      "id": "202a6760-1d87-4d11-bc67-49000f327f8d",
+      "name": "splita a lista e deixa somente os dados1",
+      "type": "n8n-nodes-base.splitOut",
+      "position": [
+        4672,
+        1408
+      ],
+      "typeVersion": 1
+    },
+    {
+      "parameters": {
+        "operation": "delete",
+        "key": "={{ $item(\"0\").$node[\"Crypto\"].json[\"data\"] }}"
+      },
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [
+        4672,
+        656
+      ],
+      "id": "9324db0b-fd3b-4407-b20e-015940189bae",
+      "name": "Redis1",
+      "credentials": {
+        "redis": {
+          "id": "mH20kC0zOKTkm5ba",
+          "name": "Redis account"
+        }
+      }
+    }
+  ],
+  "pinData": {
+    "Start": [
+      {
+        "json": {
+          "reportId": 1768480920077,
+          "documentoIndex": 2,
+          "documentoNome": "Documento_3_5oyzh0kuzhii",
+          "clienteId": "cliente-padrao-1768480920077",
+          "clienteNome": "Cliente Padrão",
+          "regimeTributario": null,
+          "file_uri": "https://generativelanguage.googleapis.com/v1beta/files/5oyzh0kuzhii",
+          "mime_type": "application/pdf",
+          "state": "ACTIVE",
+          "tipo": "FOLHA_PAGAMENTO",
+          "tipoCategoria": "folha",
+          "formato": "PDF_ESTRUTURADO",
+          "confianca": 0.95,
+          "precisaRevisao": false,
+          "indicadoresEncontrados": [
+            "Folha Mensal",
+            "Pro-Labore",
+            "Líquido"
+          ],
+          "observacao": "Extrato mensal de pro-labore, com informações de proventos e descontos.",
+          "cnpjDetectado": "35.482.062/0001-61",
+          "periodoDetectado": "12/2025",
+          "totalDocumentos": 5,
+          "timestamp": "2026-01-15T12:43:05.419Z",
+          "_debug": {
+            "respostaOriginal": "{\n  \"tipo\": \"FOLHA_PAGAMENTO\",\n  \"formato\": \"PDF_ESTRUTURADO\",\n  \"confianca\": 0.95,\n  \"indicadoresEncontrados\": [\n    \"Folha Mensal\",\n    \"Pro-Labore\",\n    \"Líquido\"\n  ],\n  \"observacao\": \"Extrato mensal de pro-labore, com informações de proventos e descontos.\",\n  \"cnpjDetectado\": \"35.482.062/0001-61\",\n  \"periodoDetectado\": \"12/2025\",\n  \"nomeArquivoOriginal\": \"Documento_3_5oyzh0kuzhii\",\n  \"estabelecimento\": \"MATRIZ\"\n}",
+            "classificacaoCompleta": {
+              "tipo": "FOLHA_PAGAMENTO",
+              "formato": "PDF_ESTRUTURADO",
+              "confianca": 0.95,
+              "indicadoresEncontrados": [
+                "Folha Mensal",
+                "Pro-Labore",
+                "Líquido"
+              ],
+              "observacao": "Extrato mensal de pro-labore, com informações de proventos e descontos.",
+              "cnpjDetectado": "35.482.062/0001-61",
+              "periodoDetectado": "12/2025",
+              "nomeArquivoOriginal": "Documento_3_5oyzh0kuzhii",
+              "estabelecimento": "MATRIZ"
+            }
+          }
+        }
+      }
+    ],
+    "Merge5": [
+      {
+        "json": {
+          "documentoNome": "Folha de Pagamento",
+          "agenteProcessador": "AGENTE_3_FOLHA",
+          "razaoSocial": "GLAUCIA M D PREZA FIGUEIREDO LTDA",
+          "periodo": "12/2025",
+          "totalSalarioBruto": "1.518,00",
+          "totalINSS": "0,00",
+          "totalFGTS": "0,00",
+          "quantidadeFuncionarios": 1,
+          "totalLiquido": "1.518,00",
+          "totalCustoFolha": "1.518,00",
+          "observacoes": "Folha de pagamento referente a Pró-labore.",
+          "timestampProcessamento": "2026-01-15T12:44:02.023Z",
+          "temErro": false
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Rotear por Tipo": {
+      "main": [
+        [
+          {
+            "node": "Requisição para o Agente 1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Requisição para o Agente 1",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Requisição para o Agente 2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Requisição para o Agente 2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Requisição para o Agente 2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Requisição para o Agente 3",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Requisição para o Agente 4",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Requisição para o Agente 4",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Requisição para o Agente 4",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Requisição para o Agente 4",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Requisição para o Agente 4",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "HTTP - Agente 1 Extrator Financeiro": {
+      "main": [
+        [
+          {
+            "node": "Merge7",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge6",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Agente 2 PGDAS": {
+      "main": [
+        [
+          {
+            "node": "Merge7",
+            "type": "main",
+            "index": 1
+          }
+        ],
+        [
+          {
+            "node": "Merge6",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "HTTP - Agente 3 Folha": {
+      "main": [
+        [
+          {
+            "node": "Merge7",
+            "type": "main",
+            "index": 2
+          }
+        ],
+        [
+          {
+            "node": "Merge6",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "HTTP - Agente 4 Notas": {
+      "main": [
+        [
+          {
+            "node": "Merge7",
+            "type": "main",
+            "index": 3
+          }
+        ],
+        [
+          {
+            "node": "Merge6",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Code - Processar Agente 1": {
+      "main": [
+        [
+          {
+            "node": "Merge5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Processar Agente 2": {
+      "main": [
+        [
+          {
+            "node": "Merge5",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Code - Processar Agente 3": {
+      "main": [
+        [
+          {
+            "node": "Merge5",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Code - Processar Agente 4": {
+      "main": [
+        [
+          {
+            "node": "Merge5",
+            "type": "main",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Merge5": {
+      "main": [
+        []
+      ]
+    },
+    "Requisição para o Agente 1": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Agente 1 Extrator Financeiro",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Requisição para o Agente 2": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Agente 2 PGDAS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Requisição para o Agente 3": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Agente 3 Folha",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Requisição para o Agente 4": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Agente 4 Notas",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          },
+          {
+            "node": "Crypto",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Rotear por Tipo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Crypto": {
+      "main": [
+        [
+          {
+            "node": "Redis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Redis": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge7": {
+      "main": [
+        [
+          {
+            "node": "Code - Processar Agente 1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Code - Processar Agente 2",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Code - Processar Agente 3",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Code - Processar Agente 4",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Redis1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge6": {
+      "main": [
+        [
+          {
+            "node": "Pega o body na memoria temporária",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Rotear por Tipo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pega o body na memoria temporária": {
+      "main": [
+        [
+          {
+            "node": "transforma em obj1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "transforma em obj1": {
+      "main": [
+        [
+          {
+            "node": "tira de obj e coloca em lista1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "tira de obj e coloca em lista1": {
+      "main": [
+        [
+          {
+            "node": "splita a lista e deixa somente os dados1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "splita a lista e deixa somente os dados1": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "2dda1b97-71fe-4459-a54a-768bac7aeb69",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "a7885ac2fd697398ed42a4a1e7e0c7326b7ca012d108e9f8d55fbfb8a1dc9387"
+  },
+  "id": "iEpYcyFUPEDz52Bv",
+  "tags": []
+}

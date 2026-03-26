@@ -1,0 +1,270 @@
+version: '3.8'
+
+# ============================================================================
+# ORGAS AI - Production Docker Compose Configuration
+# Using Real Data: app.orgahold.com infrastructure
+# ============================================================================
+# Services: Frontend, Backend API, AI Agents
+# Network: portainer_default (Traefik managed)
+# Redis & Supabase: External (shared infrastructure)
+# ============================================================================
+
+services:
+
+  # ============================================================================
+  # FRONTEND SERVICE - React + Vite
+  # ============================================================================
+  orgas-frontend:
+    image: paxley/orgas-frontend:2.0.22
+    container_name: orgas-frontend-prod
+    environment:
+      - NODE_ENV=production
+      - VITE_API_BASE_URL=https://app.orgahold.com
+      - VITE_API_PREFIX=/api
+      - VITE_FRONTEND_PROXY_SECRET=OIEeZDZOzrCUiVwiswMoMvVHmN3sBj8OQR0ozIndbahL
+      - VITE_REQUIRE_HANDSHAKE=true
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+        labels: "service=orgas-frontend,version=2.0.22"
+    deploy:
+      mode: replicated
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      labels:
+        - "traefik.enable=true"
+        - "traefik.docker.network=portainer_default"
+        - "traefik.http.routers.orgas-frontend.entrypoints=websecure"
+        - "traefik.http.routers.orgas-frontend.tls.certresolver=letsencryptresolver"
+        - "traefik.http.services.orgas-frontend.loadbalancer.server.port=80"
+        - "traefik.http.routers.orgas-frontend.rule=Host(`app.orgahold.com`) && !PathPrefix(`/api`) && !PathPrefix(`/ai`)"
+        - "traefik.http.routers.orgas-frontend.priority=1"
+    networks:
+      - portainer_default
+    restart: unless-stopped
+
+  # ============================================================================
+  # BACKEND API SERVICE - Express/TypeScript v2.0.5
+  # ============================================================================
+  orgas-api:
+    image: paxley/orgas-api:2.0.44
+    container_name: orgas-api-prod
+    environment:
+      # Environment
+      - NODE_ENV=production
+      - PORT=3000
+      - AGENT_FALLBACK_LOCAL=true
+      - FRONTEND_URL=https://app.orgahold.com
+      - FRONTEND_PROXY_SECRET=OIEeZDZOzrCUiVwiswMoMvVHmN3sBj8OQR0ozIndbahL
+
+      # Authentication & Webhooks
+      - AUTH_STATIC_TOKENS=orgas-webhook-token-2024
+      - WEBHOOK_TOKEN=iQJxl1WZw7l25btvqr4u4J3QiMXLSR4EifmkpUyVB7Rf
+      - VITE_WEBHOOK_TOKEN=GKLwKKRvyZkGYR1xzMvkHsDbzzXJlsRoH4IqhdLY0R73
+      - JWT_SECRET_FILE=/run/secrets/JWT_SECRET
+      - REQUIRE_HANDSHAKE=true
+      - JWT_HANDSHAKE_TTL=60
+      - JWT_DOWNLOAD_TTL=120
+
+      # Database - PostgreSQL/Supabase
+      # Uses DATABASE_URL (connection string) - supports both direct & transaction pooler
+      # Direct connection (5432): postgresql://user:pass@host:5432/db
+      # Transaction Pooler (6543): postgresql://user:pass@host:6543/db
+      - USE_INTERNAL_PG=true
+      - DATABASE_URL=postgresql://postgres:ecdb0882661323177373c6270710e676@supabase_db:5432/postgres
+      # Optional: Fallback to individual variables if DATABASE_URL not set
+      - DB_HOST=supabase_db
+      - DB_PORT=5432
+      - DB_NAME=postgres
+      - DB_USER=postgres
+      - DB_PASSWORD=ecdb0882661323177373c6270710e676
+      - DB_SSL=false
+      - DB_POOL_MAX=20
+
+      # HTML to PDF Conversion
+      - HTML2PDF_URL=https://html2pdf.mayacrm.shop/pdf
+      - HTML2PDF_API_KEY=B8zbDepY97N6XIqU
+
+      # Cache - Redis (External/Shared)
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=11
+
+      # Supabase Storage Configuration
+      - SUPABASE_AUTH_URL=https://supabase.dev.orgahold.com/auth/v1
+      - SUPABASE_STORAGE_URL=https://supabase.orgahold.com/storage/v1
+      - SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJyb2xlIjogInNlcnZpY2Vfcm9sZSIsCiAgImlzcyI6ICJzdXBhYmFzZSIsCiAgImlhdCI6IDE3MTUwNTA4MDAsCiAgImV4cCI6IDE4NzI4MTcyMDAKfQ._1IT1C2RZpdzHZGiAsxICtZsdOpeHDrDv13KxAQks38
+      - STORAGE_CACHE_TTL=3000
+      - SMTP_HOST=orgas-mailpit
+      - SMTP_PORT=1025
+      - SMTP_SECURE=false
+      - SMTP_FROM=ORGAS <no-reply@app.orgahold.com>
+      - AUTH_MAGIC_LINK_TTL=900
+      - AUTH_RESET_TTL=1800
+
+      # AI Agents Service (Internal routing via Traefik)
+      - AGENT_API_URL=http://orgas-ai-agents:8000/api
+      - AI_AGENT_TOKEN=${AI_AGENT_TOKEN:-}
+      - AGENT_API_TIMEOUT=30000
+
+    secrets:
+      - JWT_SECRET
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+        labels: "service=orgas-api,version=2.0.44"
+
+    deploy:
+      mode: replicated
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      labels:
+        # Main API Router
+        - "traefik.enable=true"
+        - "traefik.docker.network=portainer_default"
+        - "traefik.http.routers.orgas-api.entrypoints=websecure"
+        - "traefik.http.routers.orgas-api.tls.certresolver=letsencryptresolver"
+        - "traefik.http.services.orgas-api.loadbalancer.server.port=3000"
+        - "traefik.http.routers.orgas-api.rule=Host(`app.orgahold.com`) && PathPrefix(`/api`)"
+        - "traefik.http.routers.orgas-api.priority=100"
+        - "traefik.http.middlewares.orgas-api-stripprefix.stripprefix.prefixes=/api"
+        - "traefik.http.routers.orgas-api.middlewares=orgas-api-stripprefix"
+
+        # Webhook Router
+        - "traefik.http.routers.orgas-api-webhook.rule=Host(`app.orgahold.com`) && Path(`/api/webhook/ai-submit`) && (Headers(`Origin`,`https://app.orgahold.com`) || HeadersRegexp(`Referer`,`^https://app\\.orgahold\\.com/`))"
+        - "traefik.http.routers.orgas-api-webhook.entrypoints=websecure"
+        - "traefik.http.routers.orgas-api-webhook.tls.certresolver=letsencryptresolver"
+        - "traefik.http.routers.orgas-api-webhook.service=orgas-api"
+        - "traefik.http.routers.orgas-api-webhook.priority=200"
+        - "traefik.http.routers.orgas-api-webhook.middlewares=orgas-api-stripprefix,orgas-api-webhook-headers"
+        - "traefik.http.middlewares.orgas-api-webhook-headers.headers.customrequestheaders.X-Frontend-Secret=OIEeZDZOzrCUiVwiswMoMvVHmN3sBj8OQR0ozIndbahL"
+
+    networks:
+      - portainer_default
+
+    restart: unless-stopped
+
+  # ============================================================================
+  # INTERNAL SMTP SERVICE - Mailpit
+  # ============================================================================
+  orgas-mailpit:
+    image: axllent/mailpit:v1.28.2
+    container_name: orgas-mailpit-prod
+    environment:
+      - TZ=America/Sao_Paulo
+      - MP_DATABASE=/data/mailpit.db
+      - MP_MAX_MESSAGES=5000
+    volumes:
+      - orgas_mailpit_data:/data
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+        labels: "service=orgas-mailpit,version=1.28.2"
+    networks:
+      - portainer_default
+    restart: unless-stopped
+
+  # ============================================================================
+  # AI AGENTS SERVICE - FastAPI/LangGraph/LangChain v3.0.28
+  # ============================================================================
+  orgas-ai-agents:
+    image: paxley/orgas-ai-agent:3.0.29
+    container_name: orgas-ai-agent-prod
+    environment:
+      # FastAPI Configuration
+      - HOST=0.0.0.0
+      - PORT=8000
+      - WORKERS=4
+      - DEBUG=false
+      - ENVIRONMENT=production
+
+      # Database - PostgreSQL/Supabase (External/Shared)
+      - DATABASE_URL=postgresql://postgres:ecdb0882661323177373c6270710e676@supabase_db:5432/postgres
+      - DB_HOST=supabase_db
+      - DB_PORT=5432
+      - DB_NAME=postgres
+      - DB_USER=postgres
+      - DB_PASSWORD=ecdb0882661323177373c6270710e676
+      - DB_SSL=false
+
+      # Cache - Redis (External/Shared)
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=0
+
+      # LLM APIs
+      - GOOGLE_API_KEY_FILE=/run/secrets/GEMINI_API_KEY_FILE
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+
+      # Agent Configuration
+      - LOG_LEVEL=INFO
+      - MAX_WORKERS=5
+      - TIMEOUT_SECONDS=30
+      - STORAGE_CACHE_TTL=3000
+      - AI_AGENT_TOKEN=${AI_AGENT_TOKEN:-}
+
+      # Supabase Storage
+      - SUPABASE_STORAGE_URL=https://supabase.orgahold.com/storage/v1
+      - SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJyb2xlIjogInNlcnZpY2Vfcm9sZSIsCiAgImlzcyI6ICJzdXBhYmFzZSIsCiAgImlhdCI6IDE3MTUwNTA4MDAsCiAgImV4cCI6IDE4NzI4MTcyMDAKfQ._1IT1C2RZpdzHZGiAsxICtZsdOpeHDrDv13KxAQks38
+
+    secrets:
+      - GEMINI_API_KEY_FILE
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+        labels: "service=orgas-ai-agents,version=3.0.29"
+
+    deploy:
+      mode: replicated
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      labels:
+        - "traefik.enable=true"
+        - "traefik.docker.network=portainer_default"
+        - "traefik.http.routers.orgas-ai-agents.entrypoints=websecure"
+        - "traefik.http.routers.orgas-ai-agents.tls.certresolver=letsencryptresolver"
+        - "traefik.http.services.orgas-ai-agents.loadbalancer.server.port=8000"
+        - "traefik.http.routers.orgas-ai-agents.rule=Host(`app.orgahold.com`) && PathPrefix(`/api/ai`)"
+        - "traefik.http.routers.orgas-ai-agents.priority=50"
+        - "traefik.http.middlewares.orgas-ai-agents-stripprefix.stripprefix.prefixes=/api/ai"
+        - "traefik.http.routers.orgas-ai-agents.middlewares=orgas-ai-agents-stripprefix"
+
+    networks:
+      - portainer_default
+
+    restart: unless-stopped
+
+# ============================================================================
+# NETWORKS
+# ============================================================================
+volumes:
+  orgas_mailpit_data:
+
+networks:
+  portainer_default:
+    external: true
+    name: portainer_default
+
+# ============================================================================
+# SECRETS
+# ============================================================================
+secrets:
+  GEMINI_API_KEY_FILE:
+    external: true
+  JWT_SECRET:
+    external: true

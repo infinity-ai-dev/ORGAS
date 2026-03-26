@@ -1,0 +1,110 @@
+version: '3.8'
+
+services:
+
+  # Frontend Service (unchanged)
+  orgas-frontend:
+    image: paxley/orgas-app:2.0.0
+    environment:
+      - NODE_ENV=production
+      - VITE_API_BASE_URL=https://app.orgahold.com
+      - VITE_API_PREFIX=/api
+      - VITE_FRONTEND_PROXY_SECRET=OIEeZDZOzrCUiVwiswMoMvVHmN3sBj8OQR0ozIndbahL
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+        labels: "service=orgas-frontend,version=2.0.0"
+    deploy:
+      mode: replicated
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      labels:
+        - "traefik.enable=true"
+        - "traefik.docker.network=portainer_default"
+        - "traefik.http.routers.orgas-frontend.entrypoints=websecure"
+        - "traefik.http.routers.orgas-frontend.tls.certresolver=letsencryptresolver"
+        - "traefik.http.services.orgas-frontend.loadbalancer.server.port=80"
+        - "traefik.http.routers.orgas-frontend.rule=Host(`app.orgahold.com`) && !PathPrefix(`/api`)"
+        - "traefik.http.routers.orgas-frontend.priority=1"
+    networks:
+      - portainer_default
+  # Backend API Service (v2.0.5 with Python AI Agent integration)
+  orgas-api:
+    image: paxley/orgas-api:2.0.5
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - FRONTEND_URL=https://app.orgahold.com
+      - FRONTEND_PROXY_SECRET=OIEeZDZOzrCUiVwiswMoMvVHmN3sBj8OQR0ozIndbahL
+      - AUTH_STATIC_TOKENS=orgas-webhook-token-2024
+      - WEBHOOK_TOKEN=iQJxl1WZw7l25btvqr4u4J3QiMXLSR4EifmkpUyVB7Rf
+      - VITE_WEBHOOK_TOKEN=GKLwKKRvyZkGYR1xzMvkHsDbzzXJlsRoH4IqhdLY0R73
+      - JWT_SECRET_FILE=/run/secrets/JWT_SECRET
+      # Gemini API Key via Docker secret
+      - GEMINI_API_KEY_FILE=/run/secrets/GEMINI_API_KEY_FILE
+      # Agent configuration - Python FastAPI Agent
+      - AGENT_API_URL=http://orgas-ai-agents:8000/api
+      - AGENT_API_TIMEOUT=30000
+      # Database Configuration - PostgreSQL/Supabase
+      - USE_INTERNAL_PG=true
+      - DB_HOST=supabase_db
+      - DB_PORT=5432
+      - DB_NAME=postgres
+      - DB_USER=postgres
+      - DB_PASSWORD=ecdb0882661323177373c6270710e676
+      - DB_SSL=false
+      # Cache - Redis
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_DB=11
+      # Supabase Storage Configuration
+      - SUPABASE_STORAGE_URL=https://supabase.orgahold.com/storage/v1
+      - SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJyb2xlIjogInNlcnZpY2Vfcm9sZSIsCiAgImlzcyI6ICJzdXBhYmFzZSIsCiAgImlhdCI6IDE3MTUwNTA4MDAsCiAgImV4cCI6IDE4NzI4MTcyMDAKfQ._1IT1C2RZpdzHZGiAsxICtZsdOpeHDrDv13KxAQks38
+      - STORAGE_CACHE_TTL=3000
+    secrets:
+      - GEMINI_API_KEY_FILE
+      - JWT_SECRET
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+        labels: "service=orgas-api,version=2.0.1-test"
+    deploy:
+      mode: replicated
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      labels:
+        - "traefik.enable=true"
+        - "traefik.docker.network=portainer_default"
+        - "traefik.http.routers.orgas-api.entrypoints=websecure"
+        - "traefik.http.routers.orgas-api.tls.certresolver=letsencryptresolver"
+        - "traefik.http.services.orgas-api.loadbalancer.server.port=3000"
+        - "traefik.http.routers.orgas-api.rule=Host(`app.orgahold.com`) && PathPrefix(`/api`)"
+        - "traefik.http.routers.orgas-api.priority=100"
+        - "traefik.http.middlewares.orgas-api-stripprefix.stripprefix.prefixes=/api"
+        - "traefik.http.routers.orgas-api.middlewares=orgas-api-stripprefix"
+        - "traefik.http.routers.orgas-api-webhook.rule=Host(`app.orgahold.com`) && Path(`/api/webhook/ai-submit`) && (Headers(`Origin`,`https://app.orgahold.com`) || HeadersRegexp(`Referer`,`^https://app\\.orgahold\\.com/`))"
+        - "traefik.http.routers.orgas-api-webhook.entrypoints=websecure"
+        - "traefik.http.routers.orgas-api-webhook.tls.certresolver=letsencryptresolver"
+        - "traefik.http.routers.orgas-api-webhook.service=orgas-api"
+        - "traefik.http.routers.orgas-api-webhook.priority=200"
+        - "traefik.http.routers.orgas-api-webhook.middlewares=orgas-api-stripprefix,orgas-api-webhook-headers"
+        - "traefik.http.middlewares.orgas-api-webhook-headers.headers.customrequestheaders.X-Frontend-Secret=OIEeZDZOzrCUiVwiswMoMvVHmN3sBj8OQR0ozIndbahL"
+    networks:
+      - portainer_default
+
+networks:
+  portainer_default:
+    external: true
+    name: portainer_default
+
+secrets:
+  GEMINI_API_KEY_FILE:
+    external: true
+  JWT_SECRET:
+    external: true

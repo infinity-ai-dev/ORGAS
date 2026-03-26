@@ -1,0 +1,106 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# ORGAS AI Agent - Dockerfile for AMD64 (x86-64) Architecture
+# Version: 3.0.29
+# Optimized for x86-64 Linux servers and cloud deployments
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Build Stage - Otimizado para amd64
+FROM --platform=linux/amd64 python:3.10-slim as builder
+
+# Labels
+LABEL maintainer="ORGAS AI Team"
+LABEL description="ORGAS Agent API - FastAPI + LangGraph (AMD64)"
+LABEL version="3.0.29"
+LABEL architecture="amd64"
+
+# Set architecture explicitly
+ARG TARGETARCH=amd64
+
+# Instalar dependências do sistema necessárias para amd64
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    git \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Instalar UV para gerenciamento de dependências (otimizado para amd64)
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
+    export PATH="$HOME/.local/bin:$PATH" && \
+    uv --version && \
+    echo "Building for architecture: amd64"
+
+# Set working directory
+WORKDIR /build
+
+# Copiar requirements
+COPY requirements.txt requirements-llm.txt ./
+
+# Instalar dependências com UV (cache optimization)
+RUN export PATH="$HOME/.local/bin:$PATH" && \
+    uv pip install --system --no-cache-dir \
+    -r requirements.txt \
+    -r requirements-llm.txt
+
+# Runtime Stage - Imagem final enxuta para amd64
+FROM --platform=linux/amd64 python:3.10-slim
+
+# Labels de metadados
+LABEL maintainer="ORGAS AI Team"
+LABEL description="ORGAS Agent API - FastAPI + LangGraph (AMD64)"
+LABEL version="3.0.29"
+LABEL architecture="amd64"
+
+# Set architecture explicitly
+ARG TARGETARCH=amd64
+
+# Instalar dependências mínimas de runtime
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    postgresql-client \
+    redis-tools \
+    curl \
+    ca-certificates \
+    poppler-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+# Criar usuário não-root para segurança
+RUN useradd -m -u 1000 appuser && \
+    echo "Running on AMD64 architecture"
+
+# Set working directory
+WORKDIR /app
+
+# Copiar dependências Python do builder
+COPY --from=builder /usr/local/lib/python3.10/site-packages /usr/local/lib/python3.10/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# Copiar código da aplicação
+COPY --chown=appuser:appuser . .
+
+# Copiar entrypoint script
+COPY --chown=appuser:appuser entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
+# Mudar para usuário não-root
+USER appuser
+
+# Healthcheck (reduced frequency to avoid overhead)
+HEALTHCHECK --interval=60s --timeout=5s --start-period=45s --retries=2 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Expose port
+EXPOSE 8000
+
+# Environment variables padrão (sobrescrever com .env em produção)
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PORT=8000 \
+    HOST=0.0.0.0 \
+    ENVIRONMENT=production \
+    DEBUG=false \
+    WORKERS=4 \
+    LOG_LEVEL=INFO \
+    TARGETARCH=amd64
+
+# Entrypoint: script que inicializa o agente com variáveis de ambiente
+ENTRYPOINT ["/app/entrypoint.sh"]

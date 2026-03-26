@@ -1,0 +1,68 @@
+# Build Stage - AMD64 Architecture Optimized
+FROM --platform=linux/amd64 node:20-slim AS builder
+
+WORKDIR /build
+
+# Copiar package files
+COPY package*.json ./
+
+# Instalar dependências (incluindo devDependencies para build)
+RUN npm ci
+
+# Copiar código
+COPY tsconfig.json ./
+COPY src ./src
+
+# Build TypeScript
+RUN npm run build
+
+# Runtime Stage - Imagem final enxuta
+FROM --platform=linux/amd64 node:20-slim
+
+LABEL maintainer="ORGAS Team"
+LABEL description="ORGAS Backend API - Express + TypeScript (AMD64)"
+LABEL version="2.0.44"
+LABEL architecture="amd64"
+
+WORKDIR /app
+
+# Instalar apenas ferramentas essenciais
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Criar usuário não-root para segurança
+RUN useradd -m appuser 2>/dev/null || true
+
+# Copiar package.json para npm ci em produção
+COPY --from=builder /build/package*.json ./
+
+# Instalar apenas dependências de produção
+RUN npm ci --omit=dev
+
+# Copiar código buildado do estágio anterior
+COPY --from=builder --chown=appuser:appuser /build/dist ./dist
+
+# Copiar outros arquivos necessários
+COPY --chown=appuser:appuser references ./references
+COPY --chown=appuser:appuser scripts ./scripts
+COPY --chown=appuser:appuser entrypoint.sh ./
+RUN chmod +x ./entrypoint.sh
+
+# Mudar para usuário não-root
+USER appuser
+
+# Healthcheck
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD curl -f http://localhost:3000/health || exit 1
+
+# Environment padrão
+ENV NODE_ENV=production \
+    PORT=3000 \
+    HOST=0.0.0.0
+
+EXPOSE 3000
+
+# Entrypoint
+ENTRYPOINT ["./entrypoint.sh"]
+CMD ["node", "dist/index.js"]

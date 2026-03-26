@@ -1,0 +1,283 @@
+{
+  "name": "[001][CLASSIFICAÇÃO DE DOCUMENTO]",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "const geminiResponse = $input.item.json; // Resposta do HTTP Request\nconst dadosOriginais = $input.last().json; // Dados que entraram no HTTP (do loop)\n\n// === EXTRAI E LIMPA O JSON ===\nconst rawText = geminiResponse.candidates?.[0]?.content?.parts?.[0]?.text || '{}';\nconst cleanText = rawText.replace(/```json|```/g, '').trim();\n\n// === PARSE SEGURO ===\nlet classificacao;\ntry {\n  classificacao = JSON.parse(cleanText);\n  \n  // Valida se tem os campos obrigatórios\n  if (!classificacao.tipo || !classificacao.formato) {\n    throw new Error('Classificação incompleta');\n  }\n  \n} catch (error) {\n  console.error('❌ Erro ao processar classificação:', error.message);\n  console.error('📄 Resposta recebida:', rawText);\n  \n  // Classificação de fallback\n  classificacao = {\n    tipo: 'DESCONHECIDO',\n    formato: 'PDF_ESTRUTURADO',\n    confianca: 0,\n    indicadoresEncontrados: [],\n    observacao: `Erro: ${error.message}`,\n    cnpjDetectado: null,\n    periodoDetectado: null\n  };\n}\n\n// === MAPEIA STATUS PARA FACILITAR FILTROS ===\nconst statusMap = {\n  'PGDAS_PDF': 'pgdas',\n  'PGDAS_XML': 'pgdas',\n  'EXTRATO_BANCARIO': 'extrato_financeiro',\n  'EXTRATO_CARTAO': 'extrato_financeiro',\n  'FOLHA_PAGAMENTO': 'folha',\n  'NFSE_PDF': 'nota_fiscal',\n  'NFSE_XML': 'nota_fiscal',\n  'NFE_XML': 'nota_fiscal',\n  'CTE_XML': 'nota_fiscal',\n  'RELATORIO_VENDAS': 'outros',\n  'DESCONHECIDO': 'desconhecido'\n};\n\n// === VALIDA CONFIANÇA ===\nconst confiancaMinima = 0.7;\nconst precisaRevisao = classificacao.confianca < confiancaMinima;\n\n// === RETORNA ESTRUTURA PADRONIZADA ===\nreturn {\n  // === IDENTIFICAÇÃO ===\n  reportId: dadosOriginais.reportId,\n  documentoIndex: dadosOriginais.documentoIndex,\n  documentoNome: dadosOriginais.documentoNome,\n  \n  // === DADOS DO CLIENTE ===\n  clienteId: dadosOriginais.clienteId,\n  clienteNome: dadosOriginais.clienteNome,\n  regimeTributario: dadosOriginais.regimeTributario,\n  \n  // === ARQUIVO GEMINI ===\n  file_uri: dadosOriginais.file_uri,\n  mime_type: dadosOriginais.mime_type,\n  state: dadosOriginais.state,\n  \n  // === CLASSIFICAÇÃO ===\n  tipo: classificacao.tipo,\n  tipoCategoria: statusMap[classificacao.tipo] || 'desconhecido',\n  formato: classificacao.formato,\n  confianca: classificacao.confianca,\n  precisaRevisao: precisaRevisao,\n  \n  // === METADADOS EXTRAÍDOS ===\n  indicadoresEncontrados: classificacao.indicadoresEncontrados || [],\n  observacao: classificacao.observacao || '',\n  cnpjDetectado: classificacao.cnpjDetectado || null,\n  periodoDetectado: classificacao.periodoDetectado || null,\n  \n  // === CONTROLE ===\n  totalDocumentos: dadosOriginais.totalDocumentos,\n  timestamp: new Date().toISOString(),\n  \n  // === DEBUG (opcional - remova em produção) ===\n  _debug: {\n    respostaOriginal: rawText,\n    classificacaoCompleta: classificacao\n  }\n};"
+      },
+      "id": "9040e32a-1acc-4b75-a43c-dc53b632297c",
+      "name": "Processar Classificação",
+      "type": "n8n-nodes-base.code",
+      "position": [
+        1808,
+        1344
+      ],
+      "typeVersion": 2
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1616,
+        1344
+      ],
+      "id": "8fd909bc-5b51-4ec1-89c5-5dfb693d5e73",
+      "name": "Merge4"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "key",
+              "value": "AIzaSyBJvGsG5No83LNgHU_kqh10f4Tgo4cevx8"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{\n  JSON.stringify({\n    systemInstruction: {\n      parts: [{\n        text: `# 🤖 CLASSIFICADOR DE DOCUMENTOS FISCAIS - VERSÃO 2.0\nVocê é um contador brasileiro experiente. Classifique documentos com PRECISÃO ABSOLUTA.\n\n## ✅ TIPOS VÁLIDOS (LISTA DEFINITIVA):\n\n### 📊 Grupo 1: PGDAS e Impostos\n- **PGDAS_PDF**: Extrato/Relatório do PGDAS-D (Simples Nacional)\n  Indicadores: \"PGDAS\", \"Simples Nacional\", \"Receita Bruta\", \"Alíquota\", \"Faixa\", \"RBT12\"\n  \n- **PGDAS_XML**: XML do PGDAS (raro, mas possível)\n\n- **GUIA_DAS**: Guia de pagamento do DAS (apenas a guia de cobrança)\n  Indicadores: \"Documento de Arrecadação\", \"DAS\", \"Pagar até\", código de barras\n  ⚠️ NÃO confunda com o Extrato PGDAS!\n\n### 💰 Grupo 2: Movimento Financeiro\n- **EXTRATO_BANCARIO**: Extrato de conta corrente\n  Indicadores: Nome do banco (Bradesco, Itaú, Banco do Brasil, Santander, Caixa, Inter, Nubank, C6, etc)\n  Conteúdo: Saldo, movimentações, PIX, transferências, débitos, créditos\n  \n- **EXTRATO_CARTAO**: Relatório de vendas com cartão/operadora\n  Indicadores: PagSeguro, PagBank, Stone, Cielo, Rede, GetNet, Mercado Pago, SafraPay\n  Conteúdo: Vendas por bandeira (Visa, Master, Elo), débito, crédito, PIX da operadora\n  **IMPORTANTE**: Se o nome do arquivo contém \"PAGSEGURO\", \"PAGBANK\", \"STONE\" → sempre EXTRATO_CARTAO!\n\n### 👥 Grupo 3: Folha de Pagamento\n- **FOLHA_PAGAMENTO**: Qualquer relatório de folha\n  Indicadores: \"Folha\", \"Salário\", \"INSS\", \"FGTS\", \"Proventos\", \"Descontos\", \"Líquido\"\n  Aceita: \"Resumo Mensal\", \"Resumo da Folha\", \"Contracheque\", qualquer variação\n  **IMPORTANTE**: Se o nome contém \"Resumo_Mensal\" ou número \"2071/2072\" → FOLHA_PAGAMENTO\n\n### 📝 Grupo 4: Notas Fiscais e Relatórios\n- **NFSE_XML**: XML de Nota Fiscal de Serviço\n- **NFSE_PDF**: \n  - Nota Fiscal de Serviço individual em PDF\n  - **OU** Livro Fiscal da Prefeitura (relatório oficial de NFS-e emitidas)\n  - **OU** Relatório de Serviços Prestados da Prefeitura\n  \n- **NFE_XML**: XML de Nota Fiscal Eletrônica (mercadorias)\n- **CTE_XML**: XML de Conhecimento de Transporte\n\n- **RESUMO_ACUMULADOR**: Relatório do sistema contábil (resumo de entradas/saídas)\n  Indicadores: \"Resumo por Acumulador\", \"ENTRADAS\", \"SAÍDAS\", CFOPs, valores contábeis\n  **IMPORTANTE**: Se o nome contém \"RESUMO_POR_ACUMULADOR\" → RESUMO_ACUMULADOR\n\n## 🔍 REGRAS DE CLASSIFICAÇÃO POR NOME DE ARQUIVO:\n\n### Padrões comuns e suas classificações:\n\\`\\`\\`\nEXTRATO_SIMPLES_NACIONAL*.pdf        → PGDAS_PDF\nRESUMO_POR_ACUMULADOR*.pdf           → RESUMO_ACUMULADOR\nDAS_SIMPLES_NACIONAL*.pdf            → GUIA_DAS\nEXTRATO_DE_VENDAS_PAGSEGURO*.pdf     → EXTRATO_CARTAO\n*PAGSEGURO*.pdf                      → EXTRATO_CARTAO\n*PAGBANK*.pdf                        → EXTRATO_CARTAO\n*Resumo_Mensal*.pdf                  → FOLHA_PAGAMENTO\n2071-Resumo_Mensal*.pdf              → FOLHA_PAGAMENTO\n2072-Resumo_Mensal*.pdf              → FOLHA_PAGAMENTO\n\\`\\`\\`\n\n## 🎯 FLUXO DE DECISÃO:\n\n1️⃣ **Primeiro**: Analise o NOME do arquivo\n   - Se bater com padrões acima → classifique direto\n   \n2️⃣ **Segundo**: Analise o CONTEÚDO do documento\n   - Procure indicadores-chave (logos, cabeçalhos, termos específicos)\n   \n3️⃣ **Terceiro**: Valide a classificação\n   - Confirme que faz sentido (ex: se tem vendas de cartão, não pode ser extrato bancário)\n\n## ⚠️ ARMADILHAS COMUNS:\n\n❌ **NÃO classifique PagSeguro como EXTRATO_BANCARIO**\n   → PagBank/PagSeguro é operadora de cartão: EXTRATO_CARTAO\n\n❌ **NÃO confunda Guia DAS com Extrato PGDAS**\n   → Guia DAS: apenas boleto de pagamento (GUIA_DAS)\n   → Extrato PGDAS: relatório completo com receitas (PGDAS_PDF)\n\n❌ **NÃO confunda Resumo por Acumulador com Extrato Bancário**\n   → Acumulador: relatório contábil do sistema (RESUMO_ACUMULADOR)\n   → Bancário: movimentação da conta (EXTRATO_BANCARIO)\n\n✅ **Livro da Prefeitura É SEMPRE NFSE_PDF**\n   → Mesmo que seja um relatório, se for da prefeitura: NFSE_PDF\n\n## 📊 FORMATOS POSSÍVEIS:\n- XML\n- PDF_ESTRUTURADO\n- PDF_ESCANEADO\n\n## 📤 SAÍDA OBRIGATÓRIA (JSON puro, sem markdown):\n\n{\n  \"tipo\": \"TIPO_EXATO_DA_LISTA\",\n  \"formato\": \"XML ou PDF_ESTRUTURADO ou PDF_ESCANEADO\",\n  \"confianca\": 0.95,\n  \"indicadoresEncontrados\": [\"indicador1\", \"indicador2\", \"indicador3\"],\n  \"observacao\": \"Explicação clara e objetiva da classificação\",\n  \"cnpjDetectado\": \"XX.XXX.XXX/XXXX-XX ou null\",\n  \"periodoDetectado\": \"MM/AAAA ou null\",\n  \"nomeArquivoOriginal\": \"nome completo do arquivo\",\n  \"estabelecimento\": \"MATRIZ ou FILIAL ou UNICO (baseado no CNPJ final -76 ou -57)\"\n}\n\n## 🔬 EXEMPLOS DE CLASSIFICAÇÃO:\n\n**Exemplo 1:**\nArquivo: \"EXTRATO_DE_VENDAS_PAGSEGURO_MES_04_2024.pdf\"\nConteúdo: Relatório com vendas Visa, Master, Elo, PIX\n→ tipo: \"EXTRATO_CARTAO\"\n→ observacao: \"Relatório de vendas do PagSeguro com detalhamento por bandeira\"\n\n**Exemplo 2:**\nArquivo: \"EXTRATO_SIMPLES_NACIONAL_3.pdf\"\nConteúdo: Tabela com receitas mensais, RBT12, alíquota\n→ tipo: \"PGDAS_PDF\"\n→ observacao: \"Extrato do PGDAS-D com histórico de receitas\"\n\n**Exemplo 3:**\nArquivo: \"2071-Resumo_Mensal-042024.pdf\"\nConteúdo: Proventos, descontos, INSS, FGTS\n→ tipo: \"FOLHA_PAGAMENTO\"\n→ observacao: \"Resumo mensal da folha de pagamento do estabelecimento 2071\"\n\n**Exemplo 4:**\nArquivo: \"RESUMO_POR_ACUMULADOR.pdf\"\nConteúdo: Entradas, Saídas, CFOPs, valores contábeis\n→ tipo: \"RESUMO_ACUMULADOR\"\n→ observacao: \"Relatório do sistema contábil com resumo de movimentação fiscal\"\n\n**Exemplo 5:**\nArquivo: \"DAS_SIMPLES_NACIONAL_5__Guia_de_recolhimento_.pdf\"\nConteúdo: Código de barras, valor a pagar, data de vencimento\n→ tipo: \"GUIA_DAS\"\n→ observacao: \"Guia de pagamento do DAS (apenas boleto)\"\n\n---\n\n⚠️ **ATENÇÃO FINAL:**\n- Use EXATAMENTE os tipos da lista acima\n- NÃO invente novos tipos\n- NÃO use \"DESCONHECIDO\" (sempre escolha o tipo mais próximo)\n- Confiança mínima: 0.70 (se menor, explique por quê na observação)\n- Sempre preencha o campo \"estabelecimento\" quando detectar CNPJ`\n      }]\n    },\n    contents: [\n      {\n        role: 'user',\n        parts: [{\n          text: `# DOCUMENTO PARA CLASSIFICAR\n\n**Cliente:** ${$json.clienteNome}\n**Regime Tributário:** ${$json.regimeTributario}\n**Nome do Arquivo:** ${$json.documentoNome}\n**Tamanho:** ${($json.file_size / 1024).toFixed(2)} KB\n\nPor favor, classifique este documento seguindo RIGOROSAMENTE as instruções acima.\nRetorne APENAS o JSON, sem markdown, sem explicações extras.`\n        }]\n      },\n      {\n        role: 'user',\n        parts: [{\n          file_data: {\n            file_uri: $json.file_uri,\n            mime_type: $json.mime_type\n          }\n        }]\n      }\n    ],\n    generationConfig: {\n      temperature: 0.1,  // ← Reduzido de 0.3 para 0.1 (mais determinístico)\n      maxOutputTokens: 2000,\n      topP: 0.85,        // ← Reduzido de 0.95 para 0.85 (mais focado)\n      topK: 20,          // ← Reduzido de 40 para 20 (mais preciso)\n      responseMimeType: 'application/json'\n    }\n  })\n}}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "9b3e898d-1b54-423c-9c21-a91d9f541564",
+      "name": "HTTP - Agente 0 Classificador",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        1440,
+        1056
+      ],
+      "typeVersion": 4.2,
+      "retryOnFail": true
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "fbf8c679-73a8-41e3-b278-a7f042c2fb32",
+      "name": "Loop - Classificação",
+      "type": "n8n-nodes-base.splitInBatches",
+      "position": [
+        928,
+        1040
+      ],
+      "typeVersion": 3
+    },
+    {
+      "parameters": {
+        "amount": 8
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        1232,
+        1056
+      ],
+      "id": "85c5d056-a953-4359-a290-119a7e551d92",
+      "name": "Wait1",
+      "webhookId": "e234f926-86f4-469d-bc43-52b787ec825a"
+    },
+    {
+      "parameters": {
+        "inputSource": "passthrough"
+      },
+      "id": "8ad9251a-6786-4ff1-8eb4-ab586a735407",
+      "typeVersion": 1.1,
+      "name": "Start",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "position": [
+        720,
+        1040
+      ]
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1232,
+        896
+      ],
+      "id": "fc50685b-6b39-4f12-b5f5-e5f32b69a5b9",
+      "name": "No Operation, do nothing"
+    }
+  ],
+  "pinData": {
+    "Start": [
+      {
+        "json": {
+          "file_uri": "https://generativelanguage.googleapis.com/v1beta/files/jewqki8beb31",
+          "mime_type": "application/pdf",
+          "state": "ACTIVE",
+          "documentoIndex": 4,
+          "documentoNome": "Documento_5_jewqki8beb31",
+          "documentoTipo": "DESCONHECIDO",
+          "clienteId": "cliente-padrao-1768488596951",
+          "clienteNome": "Cliente Padrão",
+          "regimeTributario": null,
+          "reportId": 1768488596951,
+          "totalDocumentos": 5,
+          "upload_timestamp": "2026-01-15T14:50:21.179Z",
+          "statusVerificado": true,
+          "pronto": true
+        }
+      }
+    ],
+    "No Operation, do nothing": [
+      {
+        "json": {
+          "reportId": 1768488596951,
+          "documentoIndex": 4,
+          "documentoNome": "Documento_5_jewqki8beb31",
+          "clienteId": "cliente-padrao-1768488596951",
+          "clienteNome": "Cliente Padrão",
+          "regimeTributario": null,
+          "file_uri": "https://generativelanguage.googleapis.com/v1beta/files/jewqki8beb31",
+          "mime_type": "application/pdf",
+          "state": "ACTIVE",
+          "tipo": "NFSE_PDF",
+          "tipoCategoria": "nota_fiscal",
+          "formato": "PDF_ESTRUTURADO",
+          "confianca": 0.98,
+          "precisaRevisao": false,
+          "indicadoresEncontrados": [
+            "Prefeitura Municipal",
+            "Livro fiscal",
+            "Documentos fiscais de serviços prestados",
+            "Inscrição municipal",
+            "Simples nacional"
+          ],
+          "observacao": "Livro Fiscal da Prefeitura Municipal de Juara, contendo informações sobre os serviços prestados pela empresa.",
+          "cnpjDetectado": "34.225.346/0001-00",
+          "periodoDetectado": "12/2025",
+          "totalDocumentos": 5,
+          "timestamp": "2026-01-15T14:51:23.521Z",
+          "_debug": {
+            "respostaOriginal": "{\n  \"tipo\": \"NFSE_PDF\",\n  \"formato\": \"PDF_ESTRUTURADO\",\n  \"confianca\": 0.98,\n  \"indicadoresEncontrados\": [\n    \"Prefeitura Municipal\",\n    \"Livro fiscal\",\n    \"Documentos fiscais de serviços prestados\",\n    \"Inscrição municipal\",\n    \"Simples nacional\"\n  ],\n  \"observacao\": \"Livro Fiscal da Prefeitura Municipal de Juara, contendo informações sobre os serviços prestados pela empresa.\",\n  \"cnpjDetectado\": \"34.225.346/0001-00\",\n  \"periodoDetectado\": \"12/2025\",\n  \"nomeArquivoOriginal\": \"Documento_5_jewqki8beb31\",\n  \"estabelecimento\": \"MATRIZ\"\n}",
+            "classificacaoCompleta": {
+              "tipo": "NFSE_PDF",
+              "formato": "PDF_ESTRUTURADO",
+              "confianca": 0.98,
+              "indicadoresEncontrados": [
+                "Prefeitura Municipal",
+                "Livro fiscal",
+                "Documentos fiscais de serviços prestados",
+                "Inscrição municipal",
+                "Simples nacional"
+              ],
+              "observacao": "Livro Fiscal da Prefeitura Municipal de Juara, contendo informações sobre os serviços prestados pela empresa.",
+              "cnpjDetectado": "34.225.346/0001-00",
+              "periodoDetectado": "12/2025",
+              "nomeArquivoOriginal": "Documento_5_jewqki8beb31",
+              "estabelecimento": "MATRIZ"
+            }
+          }
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Loop - Classificação": {
+      "main": [
+        [
+          {
+            "node": "No Operation, do nothing",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Merge4",
+            "type": "main",
+            "index": 1
+          },
+          {
+            "node": "Wait1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP - Agente 0 Classificador": {
+      "main": [
+        [
+          {
+            "node": "Merge4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Processar Classificação": {
+      "main": [
+        [
+          {
+            "node": "Loop - Classificação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge4": {
+      "main": [
+        [
+          {
+            "node": "Processar Classificação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait1": {
+      "main": [
+        [
+          {
+            "node": "HTTP - Agente 0 Classificador",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start": {
+      "main": [
+        [
+          {
+            "node": "Loop - Classificação",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "783129a8-0a86-41a0-b43b-6d13e30975dd",
+  "meta": {
+    "instanceId": "a7885ac2fd697398ed42a4a1e7e0c7326b7ca012d108e9f8d55fbfb8a1dc9387"
+  },
+  "id": "qi5mVzuv79DIRsqc",
+  "tags": []
+}

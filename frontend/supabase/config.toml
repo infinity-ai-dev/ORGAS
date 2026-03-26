@@ -1,0 +1,25 @@
+project_id = "bxvylgkxdtkoikcksyvn"
+
+[functions.classify-document]
+verify_jwt = false
+
+[functions.extract-data]
+verify_jwt = false
+
+[functions.extract-financial]
+verify_jwt = false
+
+[functions.extract-pgdas]
+verify_jwt = false
+
+[functions.extract-payroll]
+verify_jwt = false
+
+[functions.extract-invoices]
+verify_jwt = false
+
+[functions.consolidate-report]
+verify_jwt = false
+
+[functions.upload-to-gemini]
+verify_jwt = false

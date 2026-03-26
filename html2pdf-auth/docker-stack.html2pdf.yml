@@ -1,0 +1,54 @@
+version: "3.9"
+
+services:
+  html2pdf:
+    image: paxley/orgas-convert-html-pdf:0.1.6
+    environment:
+      - NODE_ENV=production
+      - PORT=1724
+    deploy:
+      replicas: 1
+      update_config:
+        parallelism: 1
+        delay: 5s
+        order: start-first
+      restart_policy:
+        condition: on-failure
+        max_attempts: 3
+        window: 60s
+      resources:
+        limits:
+          cpus: "0.75"
+          memory: 512M
+        reservations:
+          cpus: "0.10"
+          memory: 128M
+      labels:
+        - traefik.enable=true
+        - traefik.docker.network=portainer_default
+
+        # HTTPS
+        - traefik.http.routers.html2pdf_https.rule=Host(`html2pdf.mayacrm.shop`)
+        - traefik.http.routers.html2pdf_https.entrypoints=websecure
+        - traefik.http.routers.html2pdf_https.tls.certresolver=letsencryptresolver
+        - traefik.http.routers.html2pdf_https.service=html2pdf
+        - traefik.http.services.html2pdf.loadbalancer.server.port=1724
+        - traefik.http.services.html2pdf.loadbalancer.passHostHeader=1
+
+        # HTTP -> HTTPS
+        - traefik.http.routers.html2pdf_http.rule=Host(`html2pdf.mayacrm.shop`)
+        - traefik.http.routers.html2pdf_http.entrypoints=web
+        - traefik.http.routers.html2pdf_http.middlewares=html2pdf-https-redirect
+        - traefik.http.middlewares.html2pdf-https-redirect.redirectscheme.scheme=https
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - portainer_default
+
+networks:
+  portainer_default:
+    external: true
+    name: portainer_default

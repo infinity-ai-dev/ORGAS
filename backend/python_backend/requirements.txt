@@ -1,0 +1,58 @@
+# LangGraph + LangChain Core (Latest compatible versions)
+langgraph>=0.0.60
+langchain>=0.1.5
+langchain-core>=0.1.20
+langchain-community>=0.0.20
+
+# LLM Providers (com SDKs de desenvolvimento)
+# Principal: Google Gemini 2.5 Flash
+google-generativeai>=0.3.0
+langchain-google-genai>=0.0.1
+
+# Fallback 1: OpenAI
+openai>=1.3.0
+langchain-openai>=0.0.1
+
+# Fallback 2: Grok/xAI (OpenAI-compatible)
+# Note: Grok uses OpenAI API format with custom endpoint
+langchain-anthropic>=0.1.0
+
+# Extra LLM providers
+anthropic>=0.7.0
+
+# Web Framework
+fastapi>=0.100.0
+uvicorn>=0.23.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+
+# Database + Cache
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.0
+redis>=5.0.0
+
+# Async HTTP
+httpx>=0.25.0
+aiofiles>=23.0.0
+
+# LLM APIs
+anthropic>=0.7.0
+google-generativeai>=0.3.0
+openai>=1.0.0
+
+# Utilities
+python-dotenv>=1.0.0
+tenacity>=8.2.0
+structlog>=23.0.0
+
+# Optional: Document processing
+pillow>=10.0.0
+pypdf>=5.4.0
+pytesseract>=0.3.0
+
+# Dev dependencies
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+black>=23.0.0
+ruff>=0.1.0
+mypy>=1.0.0

@@ -1,0 +1,462 @@
+{
+  "name": "Parte II - geração documento",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "geracao-documento",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -704,
+        -96
+      ],
+      "id": "e3a05189-1091-4f9e-b893-15d6f08b9d26",
+      "name": "Webhook",
+      "webhookId": "dcdb418f-ef83-442e-887d-e9334de8affa"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a6926d5e-adae-4012-b89e-b9472e9b380e",
+              "name": "body",
+              "value": "={{ $json.body }}",
+              "type": "object"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -496,
+        -96
+      ],
+      "id": "2be19503-0a1f-4b4b-b10c-63a2eb3c4fef",
+      "name": "credenciais"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "relatorios_aprovados",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "relatorio_id",
+              "condition": "eq",
+              "keyValue": "={{ $json.body.reportId }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        -288,
+        -96
+      ],
+      "id": "025bbe33-bd63-4c49-b8f1-5382a8fb2a2c",
+      "name": "Get many rows",
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "vXlOd4kw29UypwiD",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "01fb2f9d-0659-4c58-bd74-881d908f44ae",
+              "name": "secoes_json",
+              "value": "={{ $json.secoes_json }}",
+              "type": "object"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        128,
+        -96
+      ],
+      "id": "c90a6d34-dd7d-4eaf-bb8c-65bc65dac37a",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\n\n// ========================================\n// PARSEAR DADOS\n// ========================================\n\nlet dados = input.secoes_json;\n\n// Se vier como string JSON, parsear\nif (typeof dados === 'string') {\n  dados = JSON.parse(dados);\n}\n\nconsole.log('Dados parseados com sucesso!');\nconsole.log('Empresa:', dados.dadosCabecalho.razaoSocial);\nconsole.log('Período:', dados.dadosCabecalho.periodo);\n\n// ========================================\n// EXTRAIR DADOS DE CADA SEÇÃO\n// ========================================\n\nconst cab = dados.dadosCabecalho;\nconst s1 = dados.dadosSecao1;\nconst s2 = dados.dadosSecao2;\nconst s3 = dados.dadosSecao3;\nconst s4 = dados.dadosSecao4;\nconst s5 = dados.dadosSecao5;\nconst s6 = dados.dadosSecao6;\nconst s7 = dados.dadosSecao7;\nconst s8 = dados.dadosSecao8;\n\n// ========================================\n// ✅ CORRIGIR SEÇÃO 8 - OBSERVAÇÃO\n// ========================================\n\nconst anexo = s1.anexo || s8.detalhes?.anexo;\nconst atividade = (['I', 'II'].includes(anexo)) ? 'comércio' : 'prestação de serviços';\n\n// Usar valores já formatados\nconst divergenciaFormatada = s2.divergencia?.valorFormatado || 'R$ 0,00';\nconst divergenciaPct = s2.divergencia?.porcentagem || '0%';\nconst divergenciaExiste = s2.divergencia?.valor > 0;\n\n// ✅ OBSERVAÇÃO CORRIGIDA\nconst observacaoCorrigida = `A empresa ${cab.razaoSocial} é optante pelo Simples Nacional e atua no ramo de ${atividade}, enquadrada no Anexo ${anexo}. O extrato bancário (${s2.banco}) ${divergenciaExiste ? 'apresenta divergência de ' + divergenciaFormatada + ' (' + divergenciaPct + ')' : 'está em conformidade'} entre o movimento financeiro e a receita declarada. O DAS da competência ${cab.periodo} está pendente de pagamento.`;\n\nconsole.log('✅ Observação corrigida:', observacaoCorrigida);\n\n// ========================================\n// VALIDAR SE DEVE MOSTRAR SEÇÃO 7\n// ========================================\n\nconst ehComercio = ['I', 'II'].includes(anexo);\nconst mostrarSecao7 = !ehComercio && s7 !== null && s7?.temDadosSuficientes;\n\nconsole.log('=== VALIDAÇÃO SEÇÃO 7 ===');\nconsole.log('Anexo da empresa:', anexo);\nconsole.log('É comércio (I ou II)?', ehComercio);\nconsole.log('Seção 7 é null?', s7 === null);\nconsole.log('Mostrar Seção 7?', mostrarSecao7);\n\n// ========================================\n// VALIDAR STATUS DOS DOCUMENTOS\n// ========================================\n\nconst temVendasCartao = s2.movimento?.vendasCartao?.valor > 0;\n\nif (s6 && s6.documentos) {\n  s6.documentos = s6.documentos.map(doc => {\n    if (doc.nome.toLowerCase().includes('cartão') || doc.nome.toLowerCase().includes('administradora')) {\n      if (temVendasCartao) {\n        console.log('✅ Corrigindo status do Extrato do Cartão: marcando como ANALISADO');\n        return {\n          ...doc,\n          analisado: true,\n          icone: '✓',\n          cor: '#10b981'\n        };\n      }\n    }\n    return doc;\n  });\n\n  s6.resumo.analisados = s6.documentos.filter(d => d.analisado).length;\n  s6.resumo.naoAnalisados = s6.documentos.filter(d => !d.analisado).length;\n}\n\n// ========================================\n// GERAR HTML COMPLETO\n// ========================================\n\nconst htmlCompleto = `<!DOCTYPE html>\n<html lang=\"pt-BR\">\n<head>\n    <meta charset=\"UTF-8\">\n    <title>Parecer Fiscal - ${cab.periodo}</title>\n    <style>\n        @page { size: A4; margin: 15mm 10mm; }\n        * { box-sizing: border-box; margin: 0; padding: 0; }\n        body { font-family: 'Segoe UI', sans-serif; font-size: 11px; color: #374151; }\n        .header { background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%); color: white; padding: 15px; text-align: center; margin-bottom: 15px; border-radius: 6px; }\n        .header h1 { font-size: 18px; margin-bottom: 5px; }\n        .empresa-info { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 20px; background: #f8fafc; padding: 15px; border-radius: 6px; border: 1px solid #e5e7eb; }\n        .info-item { display: flex; gap: 8px; }\n        .info-label { font-size: 9px; color: #6b7280; text-transform: uppercase; font-weight: 600; }\n        .info-value { font-size: 11px; font-weight: 600; color: #1e293b; }\n        .section { margin-bottom: 25px; page-break-inside: avoid; }\n        .section h2 { background: #f1f5f9; color: #334155; padding: 10px 15px; margin-bottom: 15px; font-size: 14px; font-weight: 700; border-left: 4px solid #3b82f6; border-radius: 4px; }\n        .section h3 { color: #475569; font-size: 12px; font-weight: 600; margin-bottom: 12px; }\n        table { width: 100%; border-collapse: collapse; font-size: 10px; border: 2px solid #d97706; margin-bottom: 15px; }\n        th, td { padding: 8px 6px; border: 1px solid #d97706; }\n        th { background: #fbbf24; color: #78350f; font-weight: 700; }\n        .text-center { text-align: center; }\n        .linha-total { background: #fef3c7 !important; font-weight: bold; }\n        .alert { padding: 12px 15px; border-radius: 6px; margin: 15px 0; }\n        .alert-info { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e3a8a; }\n        .alert-warning { background: #fef3c7; border: 1px solid #fde68a; color: #78350f; }\n        .grid-2x2 { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-bottom: 15px; }\n        .grid-item { background: #e0f2fe; padding: 15px; border-radius: 6px; border-left: 4px solid #0284c7; }\n        .grid-item h4 { margin: 0 0 8px 0; color: #0369a1; font-size: 11px; }\n        \n        /* GRÁFICO */\n        .chart-wrapper { background: white; padding: 25px; border-radius: 8px; border: 2px solid #e5e7eb; margin: 20px 0; }\n        .chart-title { text-align: center; color: #1f2937; margin-bottom: 35px; font-size: 16px; font-weight: bold; padding-bottom: 10px; border-bottom: 1px solid #e5e7eb; }\n        .chart-bars-area { display: flex; justify-content: space-around; align-items: flex-end; height: 280px; margin: 0 40px; background: #f8fafc; padding: 20px; border-radius: 8px; }\n        .bar-column { display: flex; flex-direction: column; align-items: center; width: 140px; position: relative; }\n        .bar-value-box { position: absolute; top: -45px; text-align: center; width: 100%; }\n        .bar-value { font-size: 15px; font-weight: bold; color: #1f2937; background: white; padding: 6px 10px; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }\n        .bar-container { position: relative; width: 90px; height: 200px; display: flex; align-items: flex-end; }\n        .bar { width: 100%; border-radius: 8px 8px 0 0; display: flex; align-items: center; justify-content: center; }\n        .bar-faturamento { background: linear-gradient(to top, #2563eb, #3b82f6); border: 2px solid #1d4ed8; box-shadow: 0 4px 8px rgba(59, 130, 246, 0.3); }\n        .bar-impostos { background: linear-gradient(to top, #dc2626, #ef4444); border: 2px solid #b91c1c; box-shadow: 0 4px 8px rgba(239, 68, 68, 0.3); min-height: 40px; }\n        .bar-percentage { color: white; font-size: 14px; font-weight: bold; text-shadow: 0 1px 2px rgba(0,0,0,0.5); }\n        .bar-label { margin-top: 15px; text-align: center; }\n        .bar-label-text { font-size: 14px; font-weight: bold; }\n        .bar-label-faturamento { color: #3b82f6; }\n        .bar-label-impostos { color: #ef4444; }\n\n        /* Comparação de Regimes */\n        .regimes-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin: 20px 0; }\n        .regime-card { background: white; border: 2px solid #e5e7eb; border-radius: 8px; padding: 20px; }\n        .regime-titulo { font-size: 13px; font-weight: bold; color: #1f2937; margin-bottom: 12px; text-align: center; }\n        .regime-valor { font-size: 18px; font-weight: bold; color: #3b82f6; text-align: center; margin: 10px 0; }\n        .regime-detalhes { font-size: 10px; color: #6b7280; margin-top: 10px; }\n        .vantagem { background: #d1fae5 !important; border-color: #10b981 !important; }\n    </style>\n</head>\n<body>\n    <div class=\"container\">\n        <!-- HEADER -->\n        <header class=\"header\">\n            <h1>PARECER SOBRE A APURAÇÃO FISCAL</h1>\n            <div>${cab.periodoFormatado}</div>\n        </header>\n\n        <!-- COMPANY INFO -->\n        <div class=\"empresa-info\">\n            <div class=\"info-item\">\n                <div>\n                    <div class=\"info-label\">Razão Social</div>\n                    <div class=\"info-value\">${cab.razaoSocial}</div>\n                </div>\n            </div>\n            <div class=\"info-item\">\n                <div>\n                    <div class=\"info-label\">CNPJ</div>\n                    <div class=\"info-value\">${cab.cnpj}</div>\n                </div>\n            </div>\n            <div class=\"info-item\">\n                <div>\n                    <div class=\"info-label\">Regime Tributário</div>\n                    <div class=\"info-value\">${cab.regimeTributario}</div>\n                </div>\n            </div>\n            <div class=\"info-item\">\n                <div>\n                    <div class=\"info-label\">Período Analisado</div>\n                    <div class=\"info-value\">${cab.periodo}</div>\n                </div>\n            </div>\n        </div>\n\n        <!-- SECTION 1: FATURAMENTO X IMPOSTOS -->\n        <section class=\"section\">\n            <h2>📊 1. Análise Faturamento Declarado x Impostos</h2>\n            <h3>a) Valores da Apuração da Competência Atual</h3>\n            <table>\n                <thead>\n                    <tr><th colspan=\"7\" class=\"text-center\" style=\"font-size: 12px; padding: 12px;\">SIMPLES NACIONAL</th></tr>\n                    <tr>\n                        <th>FATURAMENTO</th>\n                        <th class=\"text-center\">RECEITA</th>\n                        <th class=\"text-center\">ALÍQUOTA</th>\n                        <th class=\"text-center\">TOTAL IMPOSTO</th>\n                        <th class=\"text-center\">IMPOSTO RETIDO</th>\n                        <th class=\"text-center\">IMPOSTO A PAGAR</th>\n                        <th class=\"text-center\">DATA VENCIMENTO</th>\n                    </tr>\n                </thead>\n                <tbody>\n                    ${s1.estabelecimentos && s1.estabelecimentos.length > 0 ? s1.estabelecimentos.map((estab, index, array) => `\n                    <tr>\n                        <td style=\"font-weight: bold;\">${estab.descricao}</td>\n                        <td class=\"text-center\">R$ ${estab.receita || '0,00'}</td>\n                        <td class=\"text-center\">${estab.aliquota}</td>\n                        <td class=\"text-center\">${estab.imposto}</td>\n                        <td class=\"text-center\" style=\"color: ${s1.imposto.temRetencao ? '#f59e0b' : '#6b7280'};\">${s1.imposto.totalRetidoFormatado || 'R$ 0,00'}</td>\n                        <td class=\"text-center\" style=\"color: #10b981; font-weight: bold;\">${s1.imposto.impostoPagarFormatado || estab.imposto}</td>\n                        ${index === 0 ? `<td class=\"text-center\" rowspan=\"${array.length}\" style=\"color: #dc2626; font-weight: bold; vertical-align: middle;\">${estab.dataVencimento || array[array.length - 1].dataVencimento}</td>` : ''}\n                    </tr>\n                    `).join('') : `\n                    <tr>\n                        <td style=\"font-weight: bold;\">${s1.faturamento.descricao}</td>\n                        <td class=\"text-center\">${s1.faturamento.valorFormatado}</td>\n                        <td class=\"text-center\">${s1.imposto.aliquotaEfetivaFormatada}</td>\n                        <td class=\"text-center\">${s1.imposto.valorFormatado}</td>\n                        <td class=\"text-center\" style=\"color: ${s1.imposto.temRetencao ? '#f59e0b' : '#6b7280'};\">${s1.imposto.totalRetidoFormatado || 'R$ 0,00'}</td>\n                        <td class=\"text-center\" style=\"color: #10b981; font-weight: bold;\">${s1.imposto.impostoPagarFormatado || s1.imposto.valorFormatado}</td>\n                        <td class=\"text-center\" style=\"color: #dc2626; font-weight: bold;\">${s1.dataVencimento}</td>\n                    </tr>\n                    `}\n                    <tr class=\"linha-total\">\n                        <td>TOTAL</td>\n                        <td class=\"text-center\">${s1.totais ? s1.totais.faturamento : s1.faturamento.valorFormatado}</td>\n                        <td class=\"text-center\">${s1.imposto.aliquotaEfetivaFormatada || ''}</td>\n                        <td class=\"text-center\">${s1.totais ? s1.totais.imposto : s1.imposto.valorFormatado}</td>\n                        <td class=\"text-center\" style=\"color: ${s1.imposto.temRetencao ? '#f59e0b' : '#6b7280'};\">${s1.imposto.totalRetidoFormatado || 'R$ 0,00'}</td>\n                        <td class=\"text-center\" style=\"color: #10b981; font-weight: bold;\">${s1.imposto.impostoPagarFormatado || (s1.totais ? s1.totais.imposto : s1.imposto.valorFormatado)}</td>\n                        <td></td>\n                    </tr>\n                </tbody>\n            </table>\n        \n            <h3>b) Variação de Faturamentos e Impostos</h3>\n            <div class=\"chart-wrapper\">\n                <h4 class=\"chart-title\">Variação de Faturamento x Impostos</h4>\n                <div class=\"chart-bars-area\">\n                    <div class=\"bar-column\">\n                        <div class=\"bar-value-box\"><span class=\"bar-value\">${s1.totais ? s1.totais.faturamento : s1.faturamento.valorFormatado}</span></div>\n                        <div class=\"bar-container\">\n                            <div class=\"bar bar-faturamento\" style=\"height: ${s1.grafico.faturamentoAltura}%;\">\n                                <span class=\"bar-percentage\">${s1.grafico.faturamentoLabel}</span>\n                            </div>\n                        </div>\n                        <div class=\"bar-label\"><span class=\"bar-label-text bar-label-faturamento\">Faturamento</span></div>\n                    </div>\n                    <div class=\"bar-column\">\n                        <div class=\"bar-value-box\"><span class=\"bar-value\">${s1.totais ? s1.totais.imposto : s1.imposto.valorFormatado}</span></div>\n                        <div class=\"bar-container\">\n                            <div class=\"bar bar-impostos\" style=\"height: ${s1.grafico.impostoAltura}%;\">\n                                <span class=\"bar-percentage\">${s1.grafico.impostoLabel}</span>\n                            </div>\n                        </div>\n                        <div class=\"bar-label\"><span class=\"bar-label-text bar-label-impostos\">Impostos</span></div>\n                    </div>\n                </div>\n            </div>\n        </section>\n\n        <!-- SECTION 2: MOVIMENTO FINANCEIRO -->\n        <section class=\"section\">\n            <h2>💰 2. Análise Faturamento Declarado x Movimento Financeiro</h2>\n            <h3>Vendas Administradoras e Movimento Extrato Bancário - ${s2.banco}</h3>\n            \n            ${s2.temMovimento ? `\n            <div class=\"chart-wrapper\" style=\"margin-bottom: 20px;\">\n                <h4 class=\"chart-title\">Comparativo: Movimento Financeiro x Faturamento Declarado</h4>\n                <div style=\"display: flex; flex-direction: column; gap: 15px; padding: 20px; background: #f8fafc; border-radius: 8px;\">\n                    \n                    <!-- Vendas Cartão -->\n                    <div style=\"display: grid; grid-template-columns: 180px 120px 1fr; align-items: center; gap: 10px;\">\n                        <div style=\"font-weight: 600; font-size: 11px; color: #475569;\">Vendas Cartão</div>\n                        <div style=\"font-weight: bold; font-size: 12px; color: #1e293b; text-align: right;\">${s2.movimento.vendasCartao.valorFormatado}</div>\n                        <div style=\"background: #e5e7eb; border-radius: 4px; height: 30px; position: relative; overflow: hidden;\">\n                            <div style=\"background: linear-gradient(90deg, #3b82f6, #2563eb); height: 100%; width: ${Math.min((s2.movimento.vendasCartao.valor / s2.movimento.total.valor) * 100, 100)}%; border-radius: 4px;\"></div>\n                        </div>\n                    </div>\n                    \n                    <!-- PIX -->\n                    <div style=\"display: grid; grid-template-columns: 180px 120px 1fr; align-items: center; gap: 10px;\">\n                        <div style=\"font-weight: 600; font-size: 11px; color: #475569;\">PIX</div>\n                        <div style=\"font-weight: bold; font-size: 12px; color: #1e293b; text-align: right;\">${s2.movimento.pix.valorFormatado}</div>\n                        <div style=\"background: #e5e7eb; border-radius: 4px; height: 30px; position: relative; overflow: hidden;\">\n                            <div style=\"background: linear-gradient(90deg, #10b981, #059669); height: 100%; width: ${Math.min((s2.movimento.pix.valor / s2.movimento.total.valor) * 100, 100)}%; border-radius: 4px;\"></div>\n                        </div>\n                    </div>\n                    \n                    <!-- Transferências -->\n                    <div style=\"display: grid; grid-template-columns: 180px 120px 1fr; align-items: center; gap: 10px;\">\n                        <div style=\"font-weight: 600; font-size: 11px; color: #475569;\">Transferências</div>\n                        <div style=\"font-weight: bold; font-size: 12px; color: #1e293b; text-align: right;\">${s2.movimento.transferencias.valorFormatado}</div>\n                        <div style=\"background: #e5e7eb; border-radius: 4px; height: 30px; position: relative; overflow: hidden;\">\n                            <div style=\"background: linear-gradient(90deg, #f59e0b, #d97706); height: 100%; width: ${Math.min((s2.movimento.transferencias.valor / s2.movimento.total.valor) * 100, 100)}%; border-radius: 4px;\"></div>\n                        </div>\n                    </div>\n                    \n                    <!-- Depósitos -->\n                    <div style=\"display: grid; grid-template-columns: 180px 120px 1fr; align-items: center; gap: 10px;\">\n                        <div style=\"font-weight: 600; font-size: 11px; color: #475569;\">Depósitos</div>\n                        <div style=\"font-weight: bold; font-size: 12px; color: #1e293b; text-align: right;\">${s2.movimento.depositos.valorFormatado}</div>\n                        <div style=\"background: #e5e7eb; border-radius: 4px; height: 30px; position: relative; overflow: hidden;\">\n                            <div style=\"background: linear-gradient(90deg, #8b5cf6, #7c3aed); height: 100%; width: ${Math.min((s2.movimento.depositos.valor / s2.movimento.total.valor) * 100, 100)}%; border-radius: 4px;\"></div>\n                        </div>\n                    </div>\n                    \n                    <!-- SEPARADOR -->\n                    <div style=\"height: 1px; background: #cbd5e1; margin: 10px 0;\"></div>\n                    \n                    <!-- Total Movimento -->\n                    <div style=\"display: grid; grid-template-columns: 180px 120px 1fr; align-items: center; gap: 10px;\">\n                        <div style=\"font-weight: 700; font-size: 12px; color: #1e293b;\">Total Movimento</div>\n                        <div style=\"font-weight: bold; font-size: 13px; color: #1e293b; text-align: right;\">${s2.movimento.total.valorFormatado}</div>\n                        <div style=\"background: #e5e7eb; border-radius: 4px; height: 35px; position: relative; overflow: hidden;\">\n                            <div style=\"background: linear-gradient(90deg, #64748b, #475569); height: 100%; width: 100%; border-radius: 4px;\"></div>\n                        </div>\n                    </div>\n                    \n                    <!-- Faturamento Declarado -->\n                    <div style=\"display: grid; grid-template-columns: 180px 120px 1fr; align-items: center; gap: 10px;\">\n                        <div style=\"font-weight: 700; font-size: 12px; color: #1e293b;\">Faturamento Declarado</div>\n                        <div style=\"font-weight: bold; font-size: 13px; color: #dc2626; text-align: right;\">${s2.faturamentoDeclarado.valorFormatado}</div>\n                        <div style=\"background: #e5e7eb; border-radius: 4px; height: 35px; position: relative; overflow: hidden;\">\n                            <div style=\"background: linear-gradient(90deg, #dc2626, #b91c1c); height: 100%; width: ${Math.min((s2.faturamentoDeclarado.valor / s2.movimento.total.valor) * 100, 100)}%; border-radius: 4px; border: 2px solid #991b1b;\"></div>\n                        </div>\n                    </div>\n                </div>\n            </div>\n            \n            ${(() => {\n                const movimentoTotal = s2.movimento?.total?.valor || 0;\n                const fatDeclarado = s2.faturamentoDeclarado?.valor || 0;\n                const divergencia = s2.divergencia?.valor || 0;\n                \n                if (fatDeclarado >= movimentoTotal) {\n                    return `\n                    <div class=\"alert alert-info\" style=\"background: #d1fae5; border-color: #10b981; color: #065f46;\">\n                        <strong>✓ Parabéns!</strong> Seu faturamento declarado está em conformidade com o movimento bancário.\n                        <br>\n                        <span style=\"font-size: 12px; margin-top: 8px; display: block;\">\n                            Faturamento declarado é <strong style=\"color: #059669;\">${s2.divergencia.valorFormatado}</strong> (${s2.divergencia.porcentagem}) maior que o movimento bancário. Tudo certo!\n                        </span>\n                    </div>\n                    `;\n                } else if (divergencia > 0) {\n                    return `\n                    <div class=\"alert alert-warning\">\n                        <strong>⚠️ Atenção:</strong> ${s2.interpretacao}\n                        <br>\n                        <span style=\"font-size: 12px; margin-top: 8px; display: block;\">\n                            Diferença detectada: <strong style=\"color: #dc2626;\">${s2.divergencia.valorFormatado}</strong> (${s2.divergencia.porcentagem})\n                        </span>\n                    </div>\n                    `;\n                } else {\n                    return `\n                    <div class=\"alert alert-info\" style=\"background: #d1fae5; border-color: #10b981; color: #065f46;\">\n                        <strong>✓ Parabéns!</strong> Nenhuma divergência detectada entre o faturamento declarado e a movimentação bancária.\n                    </div>\n                    `;\n                }\n            })()}\n            ` : `\n            <div class=\"alert alert-info\">\n                <strong>ℹ️ Informação:</strong> Dados de movimento financeiro não fornecidos.\n            </div>\n            `}\n        </section>\n\n        <!-- SECTION 3: DOCUMENTOS FISCAIS -->\n        <section class=\"section\">\n            <h2>📄 3. Análise dos Documentos Fiscais</h2>\n            <h3>a) Status dos Documentos Fiscais</h3>\n            <div class=\"grid-2x2\">\n                <div class=\"grid-item\">\n                    <h4>NF-e:</h4>\n                    <p>${s3.documentosFiscais.nfe.status}</p>\n                </div>\n                <div class=\"grid-item\">\n                    <h4>NFC-e:</h4>\n                    <p>${s3.documentosFiscais.nfce.status}</p>\n                </div>\n                <div class=\"grid-item\">\n                    <h4>CT-e:</h4>\n                    <p>${s3.documentosFiscais.cte.status}</p>\n                </div>\n                <div class=\"grid-item\">\n                    <h4>NFS-e:</h4>\n                    <p>${s3.documentosFiscais.nfse.status}</p>\n                    ${s3.documentosFiscais.nfse.observacoes ? `<p style=\"margin-top: 8px; font-style: italic; color: #6b7280; font-size: 10px;\">${s3.documentosFiscais.nfse.observacoes}</p>` : ''}\n                    ${s3.documentosFiscais.nfse.quantidadeCanceladas > 0 ? `<p style=\"margin-top: 8px; color: #dc2626; font-weight: bold;\">${s3.documentosFiscais.nfse.quantidadeCanceladas} nota(s) cancelada(s)</p>` : ''}\n                </div>\n            </div>\n            \n            <h3>b) Notas Duplicadas</h3>\n            <div class=\"grid-item\">\n                <p>${s3.notasDuplicadas.mensagem}</p>\n            </div>\n        </section>\n\n        <!-- SECTION 4: LUCRO/PREJUÍZO -->\n        <section class=\"section\">\n            <h2>📈 4. Análise do Lucro/Prejuízo Fiscal</h2>\n            <h3>Tabela com valores acumulados durante o ano</h3>\n            <table>\n                <thead>\n                    <tr>\n                        <th>Mês</th>\n                        <th class=\"text-center\">Faturamento Bruto</th>\n                        <th class=\"text-center\">Impostos</th>\n                        <th class=\"text-center\">Compras</th>\n                        <th class=\"text-center\">Folha</th>\n                        <th class=\"text-center\">Lucro/Prejuízo Estimado</th>\n                    </tr>\n                </thead>\n                <tbody>\n                    ${s4.meses.map(m => `\n                    <tr>\n                        <td>${m.mes}</td>\n                        <td class=\"text-center\">${m.faturamento.valorFormatado}</td>\n                        <td class=\"text-center\">${m.impostos.valorFormatado}</td>\n                        <td class=\"text-center\">${m.compras.valorFormatado}</td>\n                        <td class=\"text-center\">${m.folha.valorFormatado}</td>\n                        <td class=\"text-center\" style=\"color: ${m.lucro.cor}; font-weight: bold;\">\n                            ${m.lucro.valorFormatado}\n                        </td>\n                    </tr>\n                    `).join('')}\n                    <tr class=\"linha-total\">\n                        <td>TOTAL ACUMULADO</td>\n                        <td class=\"text-center\">${s4.totais.faturamento.valorFormatado}</td>\n                        <td class=\"text-center\">${s4.totais.impostos.valorFormatado}</td>\n                        <td class=\"text-center\">${s4.totais.compras.valorFormatado}</td>\n                        <td class=\"text-center\">${s4.totais.folha.valorFormatado}</td>\n                        <td class=\"text-center\" style=\"color: ${s4.totais.lucro.cor}; font-weight: bold; font-size: 14px;\">\n                            ${s4.totais.lucro.valorFormatado}\n                        </td>\n                    </tr>\n                </tbody>\n            </table>\n        </section>\n\n        <!-- SECTION 5: DOCUMENTOS QUE ACOMPANHAM -->\n        <section class=\"section\">\n            <h2>📎 5. Documentos que Acompanham esse Parecer</h2>\n            <ul style=\"list-style: none; padding-left: 0;\">\n                ${s5.documentos.map(doc => `\n                <li style=\"margin-bottom: 8px;\">\n                    <span style=\"color: ${doc.enviado ? '#10b981' : '#6b7280'}; font-weight: bold; font-size: 14px;\">\n                        ${doc.icone}\n                    </span>\n                    <span>${doc.nome}</span>\n                </li>\n                `).join('')}\n            </ul>\n        </section>\n\n        <!-- SECTION 6: DOCUMENTOS ANALISADOS -->\n        <section class=\"section\">\n            <h2>🔍 6. Documentos Analisados para Confecção desse Parecer</h2>\n            <div class=\"alert alert-info\">\n                <strong>Resumo:</strong> ${s6.resumo.analisados} de ${s6.resumo.total} documentos foram analisados.\n            </div>\n            <ul style=\"list-style: none; padding-left: 0;\">\n                ${s6.documentos.map(doc => `\n                <li style=\"margin-bottom: 8px;\">\n                    <span style=\"color: ${doc.cor}; font-weight: bold; font-size: 14px;\">\n                        ${doc.icone}\n                    </span>\n                    <span>${doc.numero}. ${doc.nome} - ${doc.analisado ? 'ANALISADO' : 'NÃO ANALISADO'}</span>\n                </li>\n                `).join('')}\n            </ul>\n        </section>\n\n        <!-- SECTION 7: COMPARAÇÃO DE REGIMES (CONDICIONAL) -->\n        ${mostrarSecao7 ? `\n        <section class=\"section\">\n            <h2>⚖️ 7. Comparação com outros Regimes Tributários</h2>\n            \n            <div class=\"alert alert-info\" style=\"margin-bottom: 20px;\">\n                <strong>ℹ️ Fator R:</strong> ${s7.fatorR.valorFormatado} - ${s7.fatorR.textoExplicativo}\n            </div>\n            \n            <div class=\"regimes-grid\">\n                <div class=\"regime-card\" style=\"border: ${s7.simplesNacionalAnexoIII.bordaDestaque};\">\n                    <div class=\"regime-titulo\">\n                        Simples Nacional<br>Anexo ${s7.simplesNacionalAnexoIII.anexo}\n                        ${s7.simplesNacionalAnexoIII.ehRegimeAtual ? `<br><span style=\"color: ${s7.simplesNacionalAnexoIII.corDestaque}; font-size: 11px;\">${s7.simplesNacionalAnexoIII.textoDestaque}</span>` : ''}\n                    </div>\n                    <div class=\"regime-valor\" style=\"color: ${s7.simplesNacionalAnexoIII.ehRegimeAtual ? s7.simplesNacionalAnexoIII.corDestaque : '#3b82f6'};\">\n                        ${s7.simplesNacionalAnexoIII.impostoFormatado}\n                    </div>\n                    <div class=\"regime-detalhes\">\n                        Alíquota: ${s7.simplesNacionalAnexoIII.aliquotaFormatada}<br>\n                        Faixa: Até R$ ${s7.simplesNacionalAnexoIII.faixaAtual}<br>\n                        ${s7.simplesNacionalAnexoIII.ehRegimeAtual ? '<strong style=\"color: #10b981;\">✓ Regime atual da empresa</strong>' : ''}\n                    </div>\n                </div>\n                \n                <div class=\"regime-card\" style=\"border: ${s7.simplesNacionalAnexoV.bordaDestaque};\">\n                    <div class=\"regime-titulo\">\n                        Simples Nacional<br>Anexo ${s7.simplesNacionalAnexoV.anexo}\n                        ${s7.simplesNacionalAnexoV.textoDestaque ? `<br><span style=\"color: ${s7.simplesNacionalAnexoV.corDestaque}; font-size: 11px;\">${s7.simplesNacionalAnexoV.textoDestaque}</span>` : ''}\n                    </div>\n                    <div class=\"regime-valor\" style=\"color: ${s7.simplesNacionalAnexoV.ehRegimeAtual ? s7.simplesNacionalAnexoV.corDestaque : '#3b82f6'};\">\n                        ${s7.simplesNacionalAnexoV.impostoFormatado}\n                    </div>\n                    <div class=\"regime-detalhes\">\n                        Alíquota: ${s7.simplesNacionalAnexoV.aliquotaFormatada}<br>\n                        ${s7.simplesNacionalAnexoV.ehMaisCaro ? `<span style=\"color: #dc2626;\">⚠️ ${s7.simplesNacionalAnexoV.diferencaFormatada} mais caro que Anexo III</span>` : ''}\n                    </div>\n                </div>\n                \n                <div class=\"regime-card\">\n                    <div class=\"regime-titulo\">Lucro Presumido</div>\n                    <div class=\"regime-valor\">${s7.lucroPresumido.impostoFormatado}</div>\n                    <div class=\"regime-detalhes\">\n                        Alíquota Efetiva: ${s7.lucroPresumido.aliquotaEfetivaFormatada}<br>\n                        Presunção: ${s7.lucroPresumido.presuncao}<br>\n                        ${s7.lucroPresumido.ehMaisCaro ? `<span style=\"color: #dc2626;\">⚠️ ${s7.lucroPresumido.diferencaFormatada} mais caro</span>` : ''}\n                    </div>\n                </div>\n            </div>\n        </section>\n        ` : ''}\n\n        <!-- SECTION 8: OBSERVAÇÕES FINAIS (CORRIGIDA) -->\n        <section class=\"section\">\n            <h2>💬 8. Observações Finais da Análise</h2>\n            <div style=\"background: #fef3c7; padding: 15px; border-radius: 6px; border-left: 4px solid #f59e0b; line-height: 1.6;\">\n                ${observacaoCorrigida}\n            </div>\n        </section>\n        \n        <!-- FOOTER -->\n        <div style=\"margin-top: 40px; padding-top: 20px; border-top: 2px solid #e5e7eb; text-align: center; color: #6b7280; font-size: 10px;\">\n            <p>Documento gerado em ${cab.dataGeracaoFormatada}</p>\n        </div>\n    </div>\n</body>\n</html>`;\n\nconsole.log('HTML gerado com sucesso!');\nconsole.log('Tamanho:', htmlCompleto.length, 'caracteres');\n\nreturn { json: { html: htmlCompleto } };"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        512,
+        -96
+      ],
+      "id": "4e9da1bf-f9b3-4b0f-b46b-ce6222a9779d",
+      "name": "Code"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://html2pdf:1724/pdf",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "filemane",
+              "value": "RELATORIO_PARECER_teste1.pdf"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "html",
+              "value": "={{ $json.html }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        976,
+        -96
+      ],
+      "id": "25d58d8e-42c1-4f51-9a89-6992337524a9",
+      "name": "Salva HTML em PDF"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "tableId": "relatorios_aprovados",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "relatorio_id",
+              "condition": "eq",
+              "keyValue": "={{ $item(\"0\").$node[\"Webhook\"].json[\"body\"][\"reportId\"] }}"
+            }
+          ]
+        },
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "arquivo_url",
+              "fieldValue": "=https://supabase.dev.orgahold.com/storage/v1/object/parecer/PARECER{{ $item(\"0\").$node[\"Get many rows\"].json[\"cnpj_matriz\"].replace(/[^0-9]/g, '') }}_{{ $item(\"0\").$node[\"Get many rows\"].json[\"competencia\"].replace(/[^0-9]/g, '') }}.pdf"
+            },
+            {
+              "fieldId": "html_content",
+              "fieldValue": "={{ $item(\"0\").$node[\"Code\"].json[\"html\"] }}"
+            },
+            {
+              "fieldId": "titulo",
+              "fieldValue": "={{ $item(\"0\").$node[\"Get many rows\"].json[\"arquivo_nome\"] }}"
+            },
+            {
+              "fieldId": "analista_nome",
+              "fieldValue": "={{ $item(\"0\").$node[\"Get many rows\"].json[\"analista_nome\"] }}"
+            },
+            {
+              "fieldId": "aprovado_em",
+              "fieldValue": "={{ $('Get many rows').item.json.aprovado_em }}"
+            },
+            {
+              "fieldId": "cliente_id",
+              "fieldValue": "={{ $json.id }}"
+            },
+            {
+              "fieldId": "cliente_nome",
+              "fieldValue": "={{ $json.razaoSocial }}"
+            },
+            {
+              "fieldId": "cnpj_matriz",
+              "fieldValue": "={{ $json.cnpjMatriz }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1408,
+        -288
+      ],
+      "id": "51c26838-f890-4c2c-9aaa-af710fe53867",
+      "name": "Update a row",
+      "credentials": {
+        "supabaseApi": {
+          "id": "oXn1XMQCGc8CzXmQ",
+          "name": "Interno"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://supabase.dev.orgahold.com/storage/v1/object/parecer/PARECER{{ $item(\"0\").$node[\"Get many rows\"].json[\"cnpj_matriz\"].replace(/[^0-9]/g, '') }}_{{ $item(\"0\").$node[\"Get many rows\"].json[\"competencia\"].replace(/[^0-9]/g, '') }}.pdf",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.ewogICJyb2xlIjogInNlcnZpY2Vfcm9sZSIsCiAgImlzcyI6ICJzdXBhYmFzZSIsCiAgImlhdCI6IDE3MTUwNTA4MDAsCiAgImV4cCI6IDE4NzI4MTcyMDAKfQ._1IT1C2RZpdzHZGiAsxICtZsdOpeHDrDv13KxAQks38"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/pdf"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1184,
+        -96
+      ],
+      "id": "e92efee8-fb02-4d19-a9b9-0ec1e7fdc265",
+      "name": "HTTP Request",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "e23463ef-2529-4ab6-8204-78a69c115e7d",
+              "leftValue": "={{ $json }}",
+              "rightValue": "",
+              "operator": {
+                "type": "object",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [
+        -80,
+        -96
+      ],
+      "id": "abde0f15-650e-49f2-bfe7-3cfb4a64594c",
+      "name": "Filter"
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "tableId": "clientesPJ",
+        "filters": {
+          "conditions": [
+            {
+              "keyName": "razaoSocial",
+              "condition": "like",
+              "keyValue": "={{ $('Get many rows').item.json.secoes_json.dadosCabecalho.razaoSocial }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        1184,
+        -288
+      ],
+      "id": "7bb9b0b2-8822-4b30-9b7c-12591eccf6a6",
+      "name": "Get many rows1",
+      "alwaysOutputData": true,
+      "credentials": {
+        "supabaseApi": {
+          "id": "vXlOd4kw29UypwiD",
+          "name": "Supabase account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "## Geração de HTML (Workflow 2)\n\nRecebe dados consolidados e gera o HTML final do parecer fiscal.\n\n### Processamento\n**Importa** → Dados consolidados do Workflow 1 (JSON com 8 seções)  \n**Parseia** → Converte string JSON se necessário  \n**Valida** → Regras condicionais (ex: Seção 7 só para serviços)  \n**Corrige** → Ajustes dinâmicos (observação final, status documentos)  \n**Renderiza** → Template HTML completo com estilos inline\n\n### Estrutura do Parecer\n1. **Faturamento x Impostos** - Tabela PGDAS + gráfico de barras\n2. **Movimento Financeiro** - Comparativo bancário + divergências\n3. **Documentos Fiscais** - Status NF-e, NFS-e, CT-e + canceladas\n4. **Lucro/Prejuízo** - Tabela histórica mensal + totais acumulados\n5. **Documentos Anexos** - Lista de documentos enviados\n6. **Documentos Analisados** - Checklist do que foi processado\n7. **Comparação de Regimes** - Simples x Lucro Presumido (CONDICIONAL - só serviços)\n8. **Observações Finais** - Texto corrido gerado dinamicamente\n\n### Validações Visuais\n✓ Seção 7 **oculta** para comércio (Anexos I e II)  \n✓ Alerta verde se faturamento > movimento (conformidade)  \n✓ Alerta amarelo se divergência moderada  \n✓ Marca extrato cartão como analisado se houver vendas\n\n### Output\nHTML completo pronto para conversão em PDF com:\n- Estilos inline (compatível com PDF)\n- Gráficos em CSS puro (barras horizontais/verticais)\n- Layout responsivo A4\n- Cores e formatação profissional\n",
+        "height": 928,
+        "width": 624
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        272,
+        -880
+      ],
+      "typeVersion": 1,
+      "id": "e46beb40-99fa-49dc-85ce-ada474c146de",
+      "name": "Sticky Note"
+    }
+  ],
+  "pinData": {
+    "Webhook": [
+      {
+        "json": {
+          "headers": {
+            "host": "n8n_n8n_webhook:5678",
+            "connection": "keep-alive",
+            "content-type": "application/json",
+            "authorization": "Bearer orgas-webhook-token-2024",
+            "accept": "*/*",
+            "accept-language": "*",
+            "sec-fetch-mode": "cors",
+            "user-agent": "node",
+            "accept-encoding": "gzip, deflate",
+            "content-length": "279"
+          },
+          "params": {},
+          "query": {},
+          "body": {
+            "competencia": "Parecer",
+            "cliente_nome": "44.118.906",
+            "relatorio_nome": "Parecer Fiscal - fiscal_simples_nacional - ANGIOCARE DIAGNOSTICOS E TRATAMENTOS VASCULARES LT - Competência: 10/2025",
+            "status": "aprovado",
+            "reportId": "1764185858192",
+            "triggered_at": "2025-11-26T19:41:50.923Z"
+          },
+          "webhookUrl": "https://webhook.orgahold.com/webhook/geracao-documento",
+          "executionMode": "production"
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "credenciais",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "credenciais": {
+      "main": [
+        [
+          {
+            "node": "Get many rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get many rows": {
+      "main": [
+        [
+          {
+            "node": "Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "Code",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code": {
+      "main": [
+        [
+          {
+            "node": "Salva HTML em PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Salva HTML em PDF": {
+      "main": [
+        [
+          {
+            "node": "Get many rows1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        []
+      ]
+    },
+    "Filter": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get many rows1": {
+      "main": [
+        [
+          {
+            "node": "Update a row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "e9e1868b-27fb-4bfe-ac00-9dddea689ab1",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "a7885ac2fd697398ed42a4a1e7e0c7326b7ca012d108e9f8d55fbfb8a1dc9387"
+  },
+  "id": "AJ4TuW9NmcDWW3pJ",
+  "tags": []
+}
